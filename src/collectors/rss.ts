@@ -41,6 +41,7 @@ export async function fetchRSSFeeds(): Promise<Article[]> {
         } catch (err) {
             console.error(`❌ Erreur sur ${source.name}:`, err);
         }
+        await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
     return articles;
