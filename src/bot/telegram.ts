@@ -14,7 +14,7 @@ export function startBot() {
     console.log('🤖 Bot Telegram démarré...');
 
     bot.onText(/\/start/, (msg) => {
-        bot.sendMessage(msg.chat.id, `👋 Bienvenue sur ton bot de veille technologique !\n\nCommandes disponibles :\n/summary — Les 5 derniers articles résumés\n/ask [question] — Pose une question sur ta base de veille`);
+        bot.sendMessage(msg.chat.id, `👋 Bienvenue sur ton bot de veille technologique !\n\nCommandes disponibles :\n/summary — Les 5 derniers articles résumés\n/ask [question] — Pose une question sur ta base de veille\n/export — Exporte ta veille en Markdown\n/analyze — Analyse automatique de ta veille`);
     });
 
     bot.onText(/\/summary/, (msg) => {
@@ -92,6 +92,49 @@ Si le contexte est insuffisant, dis-le clairement mais reste focalisé sur 2026.
         } catch (err) {
             console.error('❌ Erreur Mistral:', err);
             await bot.sendMessage(msg.chat.id, '❌ Erreur lors de la génération de la réponse.');
+        }
+    });
+
+    bot.onText(/\/analyze/, async (msg) => {
+        await bot.sendMessage(msg.chat.id, '🧠 Analyse de ta veille en cours...');
+
+        const articles = exportAllArticles() as any[];
+
+        if (articles.length === 0) {
+            await bot.sendMessage(msg.chat.id, '📭 Aucun article à analyser.');
+            return;
+        }
+
+        const context = articles.slice(0, 50).map(a =>
+            `- [${a.source}] ${a.title} : ${a.summary}`
+        ).join('\n');
+
+        try {
+            const result = await mistralClient.chat.complete({
+                model: 'mistral-small-latest',
+                messages: [{
+                    role: 'user',
+                    content: `Tu es un assistant de veille technologique Full Stack. Nous sommes en 2026.
+
+Analyse ces ${articles.length} articles collectés et génère un rapport structuré en français :
+
+1. 🔥 Top 3 tendances détectées (avec nombre d'articles)
+2. 📚 Sources les plus actives
+3. ⚠️ Lacunes détectées (sujets sous-représentés pour un dev Full Stack)
+4. 💡 Recommandations (nouvelles sources ou sujets à surveiller)
+
+Articles :
+${context}
+
+Sois concis et actionnable.`
+                }]
+            });
+
+            const analysis = result.choices?.[0]?.message?.content as string ?? 'Analyse indisponible.';
+            await bot.sendMessage(msg.chat.id, `📊 *Analyse de ta veille*\n\n${analysis}`, { parse_mode: 'Markdown' });
+        } catch (err) {
+            console.error('❌ Erreur analyse:', err);
+            await bot.sendMessage(msg.chat.id, '❌ Erreur lors de l\'analyse.');
         }
     });
 
