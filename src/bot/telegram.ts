@@ -228,9 +228,24 @@ Sois concis et actionnable.`
 }
 
 export async function notifyNewArticles(articles: any[]) {
-    for (const a of articles) {
-        const message = `🆕 Nouvel article !\n\n📌 ${a.title}\n📰 ${a.source}\n📝 ${a.summary ?? 'Résumé indisponible'}\n🔗 ${a.url}`;
-        await bot.sendMessage(config.telegram.chatId, message).catch(console.error);
+    // Grouper par source
+    const bySource = articles.reduce((acc, a) => {
+        if (!acc[a.source]) acc[a.source] = [];
+        acc[a.source].push(a);
+        return acc;
+    }, {} as Record<string, any[]>);
+
+    for (const [source, sourceArticles] of Object.entries(bySource)) {
+        const lines = (sourceArticles as any[]).map(a =>
+            `• ${a.title}\n  📝 ${a.summary?.slice(0, 150) ?? 'Résumé indisponible'}...\n  🔗 ${a.url}`
+        ).join('\n\n');
+
+        const message = `🆕 *${source}* — ${(sourceArticles as any[]).length} nouveaux articles\n\n${lines}`;
+
+        const chunks = message.match(/[\s\S]{1,4000}/g) ?? [];
+        for (const chunk of chunks) {
+            await bot.sendMessage(config.telegram.chatId, chunk).catch(console.error);
+        }
         await new Promise(resolve => setTimeout(resolve, 500));
     }
 }
