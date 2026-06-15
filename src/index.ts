@@ -34,21 +34,25 @@ async function collect() {
 
     for (const article of articles) {
         count++;
-        addLog(`✅ Collecte terminée — ${articles.length} articles traités, ${newArticles.length} nouveaux`);
         console.log(`📝 Résumé (${count}/${articles.length}) : ${article.title}`);
-        const summary = await summarizeArticle(article);
-        const result = insertArticle({ ...article, summary });
+        const { summary, score } = await summarizeArticle(article);
+        const result = insertArticle({ ...article, summary, score });
         if (result.changes > 0) {
-            newArticles.push({ ...article, summary });
+            newArticles.push({ ...article, summary, score });
         }
     }
 
-    if (newArticles.length > 0) {
-        console.log(`📲 Envoi de ${newArticles.length} notifications Telegram...`);
-        await notifyNewArticles(newArticles);
+    // Notifie uniquement les articles avec score >= 4
+    const relevantArticles = newArticles.filter(a => a.score >= 4);
+
+    if (relevantArticles.length > 0) {
+        console.log(`📲 Envoi de ${relevantArticles.length} notifications (score ≥ 4)...`);
+        addLog(`📲 ${relevantArticles.length} articles pertinents notifiés (score ≥ 4)`);
+        await notifyNewArticles(relevantArticles);
     }
 
     updateCollectStats();
+    addLog(`✅ Collecte terminée — ${articles.length} articles, ${newArticles.length} nouveaux, ${relevantArticles.length} pertinents`);
     console.log(`✅ Collecte terminée — ${articles.length} articles traités.`);
 }
 

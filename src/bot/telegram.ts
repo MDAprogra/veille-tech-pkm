@@ -240,7 +240,6 @@ Sois concis et actionnable.`
 }
 
 export async function notifyNewArticles(articles: any[]) {
-    // Grouper par source
     const bySource = articles.reduce((acc, a) => {
         if (!acc[a.source]) acc[a.source] = [];
         acc[a.source].push(a);
@@ -249,7 +248,7 @@ export async function notifyNewArticles(articles: any[]) {
 
     for (const [source, sourceArticles] of Object.entries(bySource)) {
         const lines = (sourceArticles as any[]).map(a =>
-            `• ${a.title}\n  📝 ${a.summary?.slice(0, 150) ?? 'Résumé indisponible'}...\n  🔗 ${a.url}`
+            `${'⭐'.repeat(a.score ?? 0)} (${a.score}/5)\n• ${a.title}\n  📝 ${a.summary?.slice(0, 150) ?? 'Résumé indisponible'}...\n  🔗 ${a.url}`
         ).join('\n\n');
 
         const message = `🆕 *${source}* — ${(sourceArticles as any[]).length} nouveaux articles\n\n${lines}`;
