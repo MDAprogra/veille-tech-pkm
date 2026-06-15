@@ -1,17 +1,25 @@
 import { initDB, insertArticle } from './storage/database.js';
 import { fetchRSSFeeds } from './collectors/rss.js';
+import { fetchRedditFeeds } from './collectors/reddit.js';
 import { summarizeArticle } from './processors/summarizer.js';
-import { startBot } from './bot/telegram.js';
-import { notifyNewArticles } from './bot/telegram.js';
-
+import { startBot, notifyNewArticles } from './bot/telegram.js';
 
 async function collect() {
     console.log('🔍 Démarrage de la collecte...');
-    const articles = await fetchRSSFeeds();
+
+    const [rssArticles, redditArticles] = await Promise.all([
+        fetchRSSFeeds(),
+        fetchRedditFeeds(),
+    ]);
+
+    const articles = [...rssArticles, ...redditArticles];
     const newArticles: any[] = [];
+    let count = 0;
 
     for (const article of articles) {
-        console.log(`📝 Résumé (${articles.indexOf(article) + 1}/${articles.length}) : ${article.title}`); const summary = await summarizeArticle(article);
+        count++;
+        console.log(`📝 Résumé (${count}/${articles.length}) : ${article.title}`);
+        const summary = await summarizeArticle(article);
         const result = insertArticle({ ...article, summary });
         if (result.changes > 0) {
             newArticles.push({ ...article, summary });
@@ -31,7 +39,6 @@ async function main() {
     startBot();
     await collect();
 
-    // Collecte toutes les 2 heures
     setInterval(async () => {
         await collect();
     }, 2 * 60 * 60 * 1000);
