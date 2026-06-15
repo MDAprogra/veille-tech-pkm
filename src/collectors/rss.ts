@@ -12,6 +12,14 @@ export const RSS_SOURCES = [
     { name: 'Reddit r/javascript', url: 'https://www.reddit.com/r/javascript/.rss' },
     { name: 'Reddit r/reactjs', url: 'https://www.reddit.com/r/reactjs/.rss' },
     { name: 'Reddit r/typescript', url: 'https://www.reddit.com/r/typescript/.rss' },
+    { name: 'JavaScript Weekly', url: 'https://javascriptweekly.com/rss/' },
+    { name: 'Frontend Focus', url: 'https://frontendfoc.us/rss' },
+    { name: 'This Week in React', url: 'https://thisweekinreact.com/newsletter/rss.xml' },
+    { name: 'web.dev (Google)', url: 'https://web.dev/feed.xml' },
+    { name: 'Deno Blog', url: 'https://deno.com/feed' },
+    { name: '2ality (JS)', url: 'https://2ality.com/feeds/posts.atom' },
+    { name: 'Korben', url: 'https://korben.info/feed' },
+    { name: 'Alsacréations', url: 'https://www.alsacreations.com/rss/actualites.xml' },
 ];
 
 export interface Article {
