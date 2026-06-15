@@ -1,7 +1,7 @@
 import { initDB, insertArticle } from './storage/database.js';
 import { fetchRSSFeeds } from './collectors/rss.js';
 import { summarizeArticle } from './processors/summarizer.js';
-import { startBot, notifyNewArticles } from './bot/telegram.js';
+import { startBot, notifyNewArticles, updateCollectStats } from './bot/telegram.js';
 
 async function collect() {
     console.log('🔍 Démarrage de la collecte...');
@@ -29,6 +29,7 @@ async function collect() {
         await notifyNewArticles(newArticles);
     }
 
+    updateCollectStats();
     console.log(`✅ Collecte terminée — ${articles.length} articles traités.`);
 }
 

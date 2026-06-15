@@ -10,11 +10,19 @@ const bot = new TelegramBot(config.telegram.token, { polling: true });
 const tavilyClient = tavily({ apiKey: config.tavily.apiKey });
 const mistralClient = new Mistral({ apiKey: config.mistral.apiKey });
 
+export let lastCollectTime: Date | null = null;
+export let collectCount = 0;
+
+export function updateCollectStats() {
+    lastCollectTime = new Date();
+    collectCount++;
+}
+
 export function startBot() {
     console.log('🤖 Bot Telegram démarré...');
 
     bot.onText(/\/start/, (msg) => {
-        bot.sendMessage(msg.chat.id, `👋 Bienvenue sur ton bot de veille technologique !\n\nCommandes disponibles :\n/summary — Les 5 derniers articles résumés\n/ask [question] — Pose une question sur ta base de veille\n/export — Exporte ta veille en Markdown\n/analyze — Analyse automatique de ta veille`);
+        bot.sendMessage(msg.chat.id, `👋 Bienvenue sur ton bot de veille technologique !\n\nCommandes disponibles :\n/summary — Les 5 derniers articles résumés\n/ask [question] — Pose une question sur ta base de veille\n/export — Exporte ta veille en Markdown\n/analyze — Analyse automatique de ta veille\n/infos — Statut et informations du système`);
     });
 
     bot.onText(/\/summary/, (msg) => {
@@ -29,6 +37,48 @@ export function startBot() {
             const message = `📌 ${a.title}\n📰 ${a.source}\n📝 ${a.summary ?? 'Résumé indisponible'}\n🔗 ${a.url}`;
             bot.sendMessage(msg.chat.id, message).catch(console.error);
         }
+    });
+
+    bot.onText(/\/infos/, async (msg) => {
+        const now = new Date();
+        const nextCollect = lastCollectTime
+            ? new Date(lastCollectTime.getTime() + 2 * 60 * 60 * 1000)
+            : null;
+        const timeUntilNext = nextCollect
+            ? Math.max(0, Math.round((nextCollect.getTime() - now.getTime()) / 60000))
+            : null;
+
+        const articles = exportAllArticles() as any[];
+        const recentArticles = getRecentArticles(1) as any[];
+        const lastArticle = recentArticles[0];
+
+        const message = `
+ℹ️ *Infos PKM Veille Tech*
+
+🤖 *Bot*
+├ Statut : ✅ En ligne
+├ Collectes effectuées : ${collectCount}
+└ Articles en base : ${articles.length}
+
+⏱️ *Collecte*
+├ Dernière : ${lastCollectTime ? lastCollectTime.toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }) : 'Pas encore effectuée'}
+├ Prochaine : ${nextCollect ? nextCollect.toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }) : 'Inconnue'}
+└ Dans : ${timeUntilNext !== null ? `${timeUntilNext} min` : 'Inconnue'}
+
+📰 *Dernier article collecté*
+└ ${lastArticle ? `${lastArticle.title} (${lastArticle.source})` : 'Aucun'}
+
+📡 *Sources actives*
+├ RSS/Newsletters : 13 sources
+└ Fréquence : toutes les 2h
+
+🚀 *Infrastructure*
+├ Hébergement : Fly.io Paris (cdg) 🇫🇷
+├ IA : Mistral AI 🇫🇷
+└ Stockage : SQLite (volume persistant)
+    `.trim();
+
+        await bot.sendMessage(msg.chat.id, message, { parse_mode: 'Markdown' });
     });
 
     bot.onText(/\/ask (.+)/, async (msg, match) => {
