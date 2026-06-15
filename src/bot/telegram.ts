@@ -22,7 +22,7 @@ export function startBot() {
     console.log('🤖 Bot Telegram démarré...');
 
     bot.onText(/\/start/, (msg) => {
-        bot.sendMessage(msg.chat.id, `👋 Bienvenue sur ton bot de veille technologique !\n\nCommandes disponibles :\n/summary — Les 5 derniers articles résumés\n/ask [question] — Pose une question sur ta base de veille\n/export — Exporte ta veille en Markdown\n/analyze — Analyse automatique de ta veille\n/infos — Statut et informations du système`);
+        bot.sendMessage(msg.chat.id, `👋 Bienvenue sur ton bot de veille technologique !\n\nCommandes disponibles :\n/summary — Les 5 derniers articles résumés\n/ask [question] — Pose une question sur ta base de veille\n/export — Exporte ta veille en Markdown\n/analyze — Analyse automatique de ta veille\n/infos — Statut et informations du système\n/logs — Derniers événements du pipeline`);
     });
 
     bot.onText(/\/summary/, (msg) => {
@@ -145,6 +145,18 @@ Si le contexte est insuffisant, dis-le clairement mais reste focalisé sur 2026.
         }
     });
 
+    bot.onText(/\/logs/, async (msg) => {
+        if (logs.length === 0) {
+            await bot.sendMessage(msg.chat.id, '📋 Aucun événement enregistré.');
+            return;
+        }
+        const message = `📋 *Derniers événements*\n\n${logs.slice(0, 20).join('\n')}`;
+        const chunks = message.match(/[\s\S]{1,4000}/g) ?? [];
+        for (const chunk of chunks) {
+            await bot.sendMessage(msg.chat.id, chunk).catch(console.error);
+        }
+    });
+
     bot.onText(/\/analyze/, async (msg) => {
         await bot.sendMessage(msg.chat.id, '🧠 Analyse de ta veille en cours...');
 
@@ -248,4 +260,11 @@ export async function notifyNewArticles(articles: any[]) {
         }
         await new Promise(resolve => setTimeout(resolve, 500));
     }
+}
+const logs: string[] = [];
+
+export function addLog(message: string) {
+    const timestamp = new Date().toLocaleString('fr-FR', { timeZone: 'Europe/Paris' });
+    logs.unshift(`[${timestamp}] ${message}`);
+    if (logs.length > 50) logs.pop(); // garde les 50 derniers
 }

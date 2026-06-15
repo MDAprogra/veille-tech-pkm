@@ -1,7 +1,7 @@
 import { initDB, insertArticle } from './storage/database.js';
 import { fetchRSSFeeds } from './collectors/rss.js';
 import { summarizeArticle } from './processors/summarizer.js';
-import { startBot, notifyNewArticles, updateCollectStats } from './bot/telegram.js';
+import { startBot, notifyNewArticles, updateCollectStats, addLog } from './bot/telegram.js';
 
 function isActiveHours(): boolean {
     const now = new Date();
@@ -17,10 +17,12 @@ function isActiveHours(): boolean {
 async function collect() {
     if (!isActiveHours()) {
         console.log('😴 Hors plage horaire (19h-9h) — collecte ignorée.');
+        addLog('😴 Collecte ignorée — hors plage horaire');
         return;
     }
 
     console.log('🔍 Démarrage de la collecte...');
+    addLog('🔍 Démarrage de la collecte...');
 
     const [rssArticles] = await Promise.all([
         fetchRSSFeeds(),
@@ -32,6 +34,7 @@ async function collect() {
 
     for (const article of articles) {
         count++;
+        addLog(`✅ Collecte terminée — ${articles.length} articles traités, ${newArticles.length} nouveaux`);
         console.log(`📝 Résumé (${count}/${articles.length}) : ${article.title}`);
         const summary = await summarizeArticle(article);
         const result = insertArticle({ ...article, summary });

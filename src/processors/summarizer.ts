@@ -1,6 +1,7 @@
 import { Mistral } from '@mistralai/mistralai';
 import { config } from '../config/index.js';
 import type { Article } from '../collectors/rss.js';
+import { addLog } from '../bot/telegram.js';
 
 const client = new Mistral({ apiKey: config.mistral.apiKey });
 
@@ -33,9 +34,11 @@ Réponds uniquement avec le résumé, sans introduction.
         } catch (err: any) {
             if (err?.status === 429) {
                 console.log(`⏳ Rate limit — attente 30s avant retry (${attempt}/3)`);
+                addLog(`⚠️ Rate limit Mistral — retry ${attempt}/3`);
                 await sleep(30000);
             } else {
                 console.error(`❌ Erreur résumé pour "${article.title}":`, err);
+                addLog(`❌ Résumé échoué : ${article.title.slice(0, 50)}`);
                 return 'Résumé indisponible.';
             }
         }
