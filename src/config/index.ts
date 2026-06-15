@@ -12,4 +12,7 @@ export const config = {
     db: {
         path: process.env.DB_PATH || './data/veille.db',
     },
+    tavily: {
+        apiKey: process.env.TAVILY_API_KEY || '',
+    },
 };

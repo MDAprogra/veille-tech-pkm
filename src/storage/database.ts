@@ -43,4 +43,13 @@ export function getRecentArticles(limit = 10) {
   `).all(limit);
 }
 
+export function searchArticles(query: string, limit = 5) {
+  return db.prepare(`
+    SELECT * FROM articles 
+    WHERE title LIKE ? OR summary LIKE ? OR content LIKE ?
+    ORDER BY created_at DESC 
+    LIMIT ?
+  `).all(`%${query}%`, `%${query}%`, `%${query}%`, limit);
+}
+
 export { db };
