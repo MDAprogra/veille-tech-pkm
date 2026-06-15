@@ -1,8 +1,9 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { config } from '../config/index.js';
-import { getRecentArticles, searchArticles } from '../storage/database.js';
+import { exportAllArticles, getRecentArticles, searchArticles } from '../storage/database.js';
 import { tavily } from '@tavily/core';
 import { Mistral } from '@mistralai/mistralai';
+import { writeFileSync } from 'fs';
 
 
 const bot = new TelegramBot(config.telegram.token, { polling: true });
@@ -92,6 +93,40 @@ Si le contexte est insuffisant, dis-le clairement mais reste focalisé sur 2026.
             console.error('❌ Erreur Mistral:', err);
             await bot.sendMessage(msg.chat.id, '❌ Erreur lors de la génération de la réponse.');
         }
+    });
+
+    bot.onText(/\/export/, async (msg) => {
+        await bot.sendMessage(msg.chat.id, '⏳ Génération de l\'export en cours...');
+
+        const articles = exportAllArticles() as any[];
+
+        if (articles.length === 0) {
+            await bot.sendMessage(msg.chat.id, '📭 Aucun article à exporter.');
+            return;
+        }
+
+        const date = new Date().toISOString().split('T')[0];
+        let content = `# Export Veille Technologique — ${date}\n\n`;
+        content += `> ${articles.length} articles collectés\n\n---\n\n`;
+
+        for (const a of articles) {
+            content += `## ${a.title}\n\n`;
+            content += `- **Source** : ${a.source}\n`;
+            content += `- **Date** : ${a.published_at}\n`;
+            content += `- **Lien** : ${a.url}\n\n`;
+            content += `**Résumé** : ${a.summary}\n\n`;
+            content += `---\n\n`;
+        }
+
+        const filename = `/data/veille_export_${date}.md`;
+        writeFileSync(filename, content);
+
+        await bot.sendDocument(msg.chat.id, Buffer.from(content), {}, {
+            filename: `veille_export_${date}.md`,
+            contentType: 'text/markdown',
+        });
+
+        console.log(`📤 Export généré : ${filename} (${articles.length} articles)`);
     });
 }
 

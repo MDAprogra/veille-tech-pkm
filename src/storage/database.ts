@@ -52,4 +52,12 @@ export function searchArticles(query: string, limit = 5) {
   `).all(`%${query}%`, `%${query}%`, `%${query}%`, limit);
 }
 
+export function exportAllArticles() {
+  return db.prepare(`
+    SELECT * FROM articles 
+    WHERE summary != 'Résumé indisponible.'
+    ORDER BY created_at DESC
+  `).all();
+}
+
 export { db };
