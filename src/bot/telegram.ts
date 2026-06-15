@@ -131,7 +131,11 @@ Sois concis et actionnable.`
             });
 
             const analysis = result.choices?.[0]?.message?.content as string ?? 'Analyse indisponible.';
-            await bot.sendMessage(msg.chat.id, `📊 *Analyse de ta veille*\n\n${analysis}`, { parse_mode: 'Markdown' });
+            const full = `📊 Analyse de ta veille\n\n${analysis}`;
+            const chunks = full.match(/[\s\S]{1,4000}/g) ?? [];
+            for (const chunk of chunks) {
+                await bot.sendMessage(msg.chat.id, chunk).catch(console.error);
+            }
         } catch (err) {
             console.error('❌ Erreur analyse:', err);
             await bot.sendMessage(msg.chat.id, '❌ Erreur lors de l\'analyse.');
