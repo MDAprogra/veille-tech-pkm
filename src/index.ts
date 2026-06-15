@@ -1,18 +1,16 @@
 import { initDB, insertArticle } from './storage/database.js';
 import { fetchRSSFeeds } from './collectors/rss.js';
-import { fetchRedditFeeds } from './collectors/reddit.js';
 import { summarizeArticle } from './processors/summarizer.js';
 import { startBot, notifyNewArticles } from './bot/telegram.js';
 
 async function collect() {
     console.log('🔍 Démarrage de la collecte...');
 
-    const [rssArticles, redditArticles] = await Promise.all([
+    const [rssArticles] = await Promise.all([
         fetchRSSFeeds(),
-        fetchRedditFeeds(),
     ]);
 
-    const articles = [...rssArticles, ...redditArticles];
+    const articles = [...rssArticles];
     const newArticles: any[] = [];
     let count = 0;
 

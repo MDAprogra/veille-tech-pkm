@@ -8,6 +8,10 @@ export const RSS_SOURCES = [
     { name: 'CSS Tricks', url: 'https://css-tricks.com/feed/' },
     { name: 'Node Weekly', url: 'https://nodeweekly.com/rss/' },
     { name: 'Human Coders', url: 'https://news.humancoders.com/t/javascript.rss' },
+    { name: 'Reddit r/webdev', url: 'https://www.reddit.com/r/webdev/.rss' },
+    { name: 'Reddit r/javascript', url: 'https://www.reddit.com/r/javascript/.rss' },
+    { name: 'Reddit r/reactjs', url: 'https://www.reddit.com/r/reactjs/.rss' },
+    { name: 'Reddit r/typescript', url: 'https://www.reddit.com/r/typescript/.rss' },
 ];
 
 export interface Article {
