@@ -250,5 +250,3 @@ Conformément aux exigences du référentiel RNCP Niveau 7, les choix technologi
 | **C3 — Expérimenter et mobiliser** | Déploiement §8, Roadmap §11 |
 
 ---
-
-*Document généré le 15 juin 2026 — Projet E1 IRIS Master Expert en Ingénierie des SI*
