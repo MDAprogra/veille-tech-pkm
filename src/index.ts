@@ -3,7 +3,23 @@ import { fetchRSSFeeds } from './collectors/rss.js';
 import { summarizeArticle } from './processors/summarizer.js';
 import { startBot, notifyNewArticles, updateCollectStats } from './bot/telegram.js';
 
+function isActiveHours(): boolean {
+    const now = new Date();
+    const hour = now.toLocaleString('en-US', {
+        timeZone: 'Europe/Paris',
+        hour: 'numeric',
+        hour12: false,
+    });
+    const h = parseInt(hour);
+    return h >= 9 && h < 19;
+}
+
 async function collect() {
+    if (!isActiveHours()) {
+        console.log('😴 Hors plage horaire (19h-9h) — collecte ignorée.');
+        return;
+    }
+
     console.log('🔍 Démarrage de la collecte...');
 
     const [rssArticles] = await Promise.all([
