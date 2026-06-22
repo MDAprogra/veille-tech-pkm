@@ -1,5 +1,5 @@
 import cors from "cors";
-import express from "express";
+import express, { type NextFunction, type Request, type Response } from "express";
 import { exportAllArticles, getRecentArticles, searchArticles } from "../storage/database.js";
 
 const app = express();
@@ -7,14 +7,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Middleware d'authentification
 const AUTH_TOKEN = process.env.DASHBOARD_TOKEN ?? "";
 
-function requireAuth(
-	req: express.Request,
-	res: express.Response,
-	next: express.NextFunction,
-): void {
+function requireAuth(req: Request, res: Response, next: NextFunction): void {
 	const token = req.headers.authorization?.replace("Bearer ", "");
 	if (!token || token !== AUTH_TOKEN) {
 		res.status(401).json({ error: "Non autorisé" });
@@ -23,24 +18,22 @@ function requireAuth(
 	next();
 }
 
-// Routes publiques
-app.get("/health", (_req, res) => {
+app.get("/health", (_req: Request, res: Response) => {
 	res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// Routes protégées
-app.get("/api/articles", requireAuth, (_req, res) => {
+app.get("/api/articles", requireAuth, (_req: Request, res: Response) => {
 	const articles = exportAllArticles();
 	res.json(articles);
 });
 
-app.get("/api/articles/recent", requireAuth, (req, res) => {
+app.get("/api/articles/recent", requireAuth, (req: Request, res: Response) => {
 	const limit = Number(req.query.limit) || 10;
 	const articles = getRecentArticles(limit);
 	res.json(articles);
 });
 
-app.get("/api/articles/search", requireAuth, (req, res) => {
+app.get("/api/articles/search", requireAuth, (req: Request, res: Response) => {
 	const query = String(req.query.q ?? "");
 	if (!query) {
 		res.status(400).json({ error: "Paramètre q requis" });
@@ -50,7 +43,7 @@ app.get("/api/articles/search", requireAuth, (req, res) => {
 	res.json(articles);
 });
 
-app.get("/api/stats", requireAuth, (_req, res) => {
+app.get("/api/stats", requireAuth, (_req: Request, res: Response) => {
 	const all = exportAllArticles();
 	const recent = getRecentArticles(1);
 
