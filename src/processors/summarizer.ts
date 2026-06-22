@@ -1,13 +1,28 @@
-import { Mistral } from '@mistralai/mistralai';
-import { config } from '../config/index.js';
-import type { Article } from '../collectors/rss.js';
+import { Mistral } from "@mistralai/mistralai";
+import type { Article } from "../collectors/rss.js";
+import { config } from "../config/index.js";
 
 const client = new Mistral({ apiKey: config.mistral.apiKey });
 
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export async function summarizeArticle(article: Article): Promise<{ summary: string; score: number }> {
-    const prompt = `
+interface MistralError {
+	status: number;
+}
+
+function isMistralError(err: unknown): err is MistralError {
+	return (
+		typeof err === "object" &&
+		err !== null &&
+		"status" in err &&
+		typeof (err as MistralError).status === "number"
+	);
+}
+
+export async function summarizeArticle(
+	article: Article,
+): Promise<{ summary: string; score: number }> {
+	const prompt = `
 Tu es un assistant de veille technologique spécialisé en développement web Full Stack.
 
 Analyse cet article et réponds UNIQUEMENT avec un JSON valide (sans markdown, sans backticks) :
@@ -28,30 +43,30 @@ Source : ${article.source}
 Contenu : ${article.content.slice(0, 2000)}
   `;
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-            const result = await client.chat.complete({
-                model: 'mistral-small-latest',
-                messages: [{ role: 'user', content: prompt }],
-            });
-            await sleep(1000);
+	for (let attempt = 1; attempt <= 3; attempt++) {
+		try {
+			const result = await client.chat.complete({
+				model: "mistral-small-latest",
+				messages: [{ role: "user", content: prompt }],
+			});
+			await sleep(1000);
 
-            const raw = result.choices?.[0]?.message?.content as string ?? '{}';
-            const parsed = JSON.parse(raw);
-            return {
-                summary: parsed.summary ?? 'Résumé indisponible.',
-                score: parsed.score ?? 3,
-            };
-        } catch (err: any) {
-            if (err?.status === 429) {
-                console.log(`⏳ Rate limit — attente 60s avant retry (${attempt}/3)`);
-                await sleep(60000);
-            } else {
-                console.error(`❌ Erreur résumé pour "${article.title}":`, err);
-                return { summary: 'Résumé indisponible.', score: 0 };
-            }
-        }
-    }
+			const raw = (result.choices?.[0]?.message?.content as string) ?? "{}";
+			const parsed = JSON.parse(raw);
+			return {
+				summary: parsed.summary ?? "Résumé indisponible.",
+				score: parsed.score ?? 3,
+			};
+		} catch (err: unknown) {
+			if (isMistralError(err) && err.status === 429) {
+				console.log(`⏳ Rate limit — attente 60s avant retry (${attempt}/3)`);
+				await sleep(60000);
+			} else {
+				console.error(`❌ Erreur résumé pour "${article.title}":`, err);
+				return { summary: "Résumé indisponible.", score: 0 };
+			}
+		}
+	}
 
-    return { summary: 'Résumé indisponible.', score: 0 };
+	return { summary: "Résumé indisponible.", score: 0 };
 }
