@@ -5,23 +5,34 @@ Sources RSS (13) → Collecte → Résumé Mistral AI → Scoring → SQLite →
 
 ## Sources de données
 
-### Source 1 — Flux RSS (13 sources)
+### Source 1 — Flux RSS (19 sources)
 
 | Source | URL | Thématique |
 |---|---|---|
+| **Front / Web** ||||
 | Dev.to | https://dev.to/feed | Développement général |
 | Smashing Magazine | https://www.smashingmagazine.com/feed/ | Front-end, UX |
-| CSS Tricks | https://css-tricks.com/feed/ | CSS, front-end |
-| Node Weekly | https://nodeweekly.com/rss/ | Node.js |
-| Human Coders | https://news.humancoders.com/t/javascript.rss | JavaScript |
-| Reddit r/webdev | https://www.reddit.com/r/webdev/.rss | Web dev communauté |
+| web.dev (Google) | https://web.dev/feed.xml | Web platform |
 | JavaScript Weekly | https://javascriptweekly.com/rss/ | JavaScript |
 | Frontend Focus | https://frontendfoc.us/rss | Front-end |
 | This Week in React | https://thisweekinreact.com/newsletter/rss.xml | React |
-| web.dev (Google) | https://web.dev/feed.xml | Web platform |
+| Node Weekly | https://nodeweekly.com/rss/ | Node.js |
 | Deno Blog | https://deno.com/feed | Deno, runtime JS |
+| **Data engineering / analytics** ||||
+| dbt Blog | https://www.getdbt.com/blog | Data build tool |
+| Airbyte Blog | https://airbyte.com/blog | ETL, intégration données |
+| Data Elixir | https://dataelixir.com/feed | Data science, analytics |
+| **IA / LLM** ||||
+| OpenAI Blog | https://openai.com/feed.xml?format=xml | LLM, recherche IA |
+| DeepMind Blog | https://deepmind.google/discover/blog/ | Recherche IA |
+| arXiv cs.AI + cs.LG | https://rss.arxiv.org/rss/cs.ai+cs.lg | Papers académiques IA/ML |
+| **Infra / cloud / sécurité** ||||
+| Cloudflare Blog | https://blog.cloudflare.com | Infra, sécurité, edge |
+| **Veille francophone / communauté** ||||
 | Korben | https://korben.info/feed | Tech généraliste 🇫🇷 |
 | Alsacréations | https://www.alsacreations.com/rss/actualites.xml | Web, standards 🇫🇷 |
+| Human Coders | https://news.humancoders.com/t/javascript.rss | JavaScript 🇫🇷 |
+| Reddit r/webdev | https://www.reddit.com/r/webdev/.rss | Communauté web dev |
 
 **Fréquence de collecte** : toutes les 2h, plage horaire 9h–19h (Europe/Paris)  
 **Volume par collecte** : 5 articles maximum par source, soit ~65 articles par cycle
