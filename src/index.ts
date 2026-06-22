@@ -1,3 +1,4 @@
+import { startAPI } from "./api/index.js";
 import { addLog, notifyNewArticles, startBot, updateCollectStats } from "./bot/telegram.js";
 import { fetchRSSFeeds } from "./collectors/rss.js";
 import { summarizeArticle } from "./processors/summarizer.js";
@@ -57,6 +58,7 @@ async function collect() {
 
 async function main() {
 	initDB();
+	startAPI(3000);
 	startBot();
 	await collect();
 
