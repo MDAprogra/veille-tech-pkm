@@ -1,12 +1,26 @@
-FROM node:20-alpine
+FROM node:20-alpine AS builder
 
 RUN apk add --no-cache python3 make g++
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
-COPY . .
+COPY tsconfig.json ./
+COPY src ./src
 
-CMD ["npx", "tsx", "src/index.ts"]
+RUN npx tsc
+
+FROM node:20-alpine AS production
+
+RUN apk add --no-cache python3 make g++
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+COPY --from=builder /app/dist ./dist
+
+CMD ["node", "dist/index.js"]
