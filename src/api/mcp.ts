@@ -134,6 +134,14 @@ export function setupMCP(app: Express) {
         return server;
     }
 
+    // Middleware pour forcer les headers MCP
+    app.use('/mcp', (req: Request, res: Response, next) => {
+        if (!req.headers.accept) {
+            req.headers.accept = 'application/json, text/event-stream';
+        }
+        next();
+    });
+
     // Endpoint Streamable HTTP — nouvelle instance par requête
     app.post('/mcp', async (req: Request, res: Response) => {
         const server = createServer();
