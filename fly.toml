@@ -3,18 +3,21 @@ primary_region = 'cdg'
 
 [build]
 
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = 'off'
+  auto_start_machines = false
+  min_machines_running = 1
+
 [mounts]
   source = 'veille_data'
   destination = '/data'
 
-[[vm]]
-  memory = '256mb'
-  cpu_kind = 'shared'
-  cpus = 1
-
 [deploy]
   strategy = 'immediate'
 
-[[services]]
-  min_machines_running = 1
-  max_machines_running = 1
+[[vm]]
+  memory = '512mb'
+  cpu_kind = 'shared'
+  cpus = 1
