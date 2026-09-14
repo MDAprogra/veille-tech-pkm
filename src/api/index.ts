@@ -1,6 +1,7 @@
 import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { exportAllArticles, getRecentArticles, searchArticles } from "../storage/database.js";
+import { setupMCP } from "./mcp.js";
 
 const app = express();
 
@@ -65,9 +66,13 @@ app.get("/api/stats", requireAuth, (_req: Request, res: Response) => {
 	});
 });
 
+// Intégration MCP
+setupMCP(app);
+
 export function startAPI(port = 3000) {
 	app.listen(port, () => {
 		console.log(`🌐 API démarrée sur le port ${port}`);
+		console.log(`🔌 MCP disponible sur /mcp`);
 	});
 }
 
