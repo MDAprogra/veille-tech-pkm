@@ -49,7 +49,7 @@ Contenu : ${article.content.slice(0, 2000)}
 				model: "mistral-small-latest",
 				messages: [{ role: "user", content: prompt }],
 			});
-			await sleep(1000);
+			await sleep(4000);
 
 			const raw = (result.choices?.[0]?.message?.content as string) ?? "{}";
 			const parsed = JSON.parse(raw);
@@ -59,8 +59,9 @@ Contenu : ${article.content.slice(0, 2000)}
 			};
 		} catch (err: unknown) {
 			if (isMistralError(err) && err.status === 429) {
-				console.log(`⏳ Rate limit — attente 60s avant retry (${attempt}/3)`);
-				await sleep(60000);
+				const delay = attempt * 60000;
+				console.log(`⏳ Rate limit — attente ${delay / 1000}s avant retry (${attempt}/3)`);
+				await sleep(delay);
 			} else {
 				console.error(`❌ Erreur résumé pour "${article.title}":`, err);
 				return { summary: "Résumé indisponible.", score: 0 };
