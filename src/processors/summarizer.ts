@@ -28,8 +28,13 @@ Tu es un assistant de veille technologique spécialisé en développement web Fu
 Analyse cet article et réponds UNIQUEMENT avec un JSON valide (sans markdown, sans backticks) :
 {
   "summary": "Résumé en 3-4 phrases concises en français : idée principale, pertinence Full Stack, pourquoi c'est important",
-  "score": 3
+  "score": <entier entre 1 et 5>
 }
+
+RÈGLES :
+- Le résumé DOIT être rédigé en français, même si l'article est en anglais
+- Le JSON doit être valide et ne contenir aucun texte avant ou après
+- Si le contenu est insuffisant, base-toi sur le titre et la source
 
 Le score va de 1 à 5 selon la pertinence pour un développeur Full Stack junior/mid en 2026 :
 - 5 : Indispensable (nouvelle majeure React/Node/TS, sécurité critique, outil révolutionnaire)
@@ -40,8 +45,8 @@ Le score va de 1 à 5 selon la pertinence pour un développeur Full Stack junior
 
 Titre : ${article.title}
 Source : ${article.source}
-Contenu : ${article.content.slice(0, 2000)}
-  `;
+Contenu : ${article.content?.slice(0, 2000) || 'Contenu non disponible — se baser sur le titre et la source.'}
+`;
 
 	for (let attempt = 1; attempt <= 3; attempt++) {
 		try {
