@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Veille Tech — Tableau de bord</title>
+<style>
+:root {
+	color-scheme: light;
+	--surface: #fcfcfb; --panel: #ffffff; --line: #e4e3df;
+	--text: #0b0b0b; --muted: #52514e; --series: #2a78d6; --accent: #184f95;
+}
+@media (prefers-color-scheme: dark) {
+	:root {
+		color-scheme: dark;
+		--surface: #1a1a19; --panel: #232322; --line: #3a3a37;
+		--text: #f0efec; --muted: #c3c2b7; --series: #3987e5; --accent: #9ec5f4;
+	}
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--surface); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
+main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
+header { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; justify-content: space-between; }
+h1 { font-size: 22px; margin: 0; }
+h2 { font-size: 14px; margin: 0 0 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.muted { color: var(--muted); font-size: 13px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 20px 0; }
+.tile b { display: block; font-size: 28px; line-height: 1.2; }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.bar-row { display: grid; grid-template-columns: 130px 1fr; gap: 8px; align-items: center; margin: 5px 0; font-size: 13px; }
+.bar-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.track { display: flex; align-items: center; gap: 6px; }
+.bar { height: 14px; min-width: 2px; background: var(--series); border-radius: 0 4px 4px 0; }
+.bar-row:hover .bar { filter: brightness(1.15); }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 12px; }
+input, select, button { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+input[type=search] { flex: 1 1 220px; }
+button { cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+article { border-top: 1px solid var(--line); padding: 14px 0; }
+article h3 { font-size: 16px; margin: 0 0 4px; }
+article a { color: var(--accent); text-decoration: none; }
+article a:hover { text-decoration: underline; }
+article p { margin: 6px 0 0; }
+.tag { display: inline-block; font-size: 12px; padding: 1px 8px; border: 1px solid var(--line); border-radius: 99px; margin-left: 4px; color: var(--muted); }
+#login { max-width: 380px; margin: 15vh auto; display: grid; gap: 12px; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+	<form id="login" class="panel" hidden>
+		<h1>Veille Tech</h1>
+		<label class="muted" for="token">Jeton d'accès (DASHBOARD_TOKEN)</label>
+		<input id="token" type="password" autocomplete="current-password" required>
+		<button class="primary">Ouvrir</button>
+		<div id="login-error" class="muted" role="alert"></div>
+	</form>
+
+	<div id="app" hidden>
+		<header>
+			<h1>Veille Tech — Tableau de bord</h1>
+			<div>
+				<span id="status" class="muted"></span>
+				<button id="collect">Collecter maintenant</button>
+				<button id="export-md">Export .md</button>
+				<button id="export-csv">Export .csv</button>
+				<button id="logout">Déconnexion</button>
+			</div>
+		</header>
+
+		<section class="tiles" id="tiles"></section>
+
+		<section class="charts">
+			<div class="panel"><h2>Articles par semaine</h2><div id="chart-week"></div></div>
+			<div class="panel"><h2>Articles par thème</h2><div id="chart-tag"></div></div>
+			<div class="panel"><h2>Articles par source</h2><div id="chart-source"></div></div>
+			<div class="panel"><h2>Répartition des scores</h2><div id="chart-score"></div></div>
+		</section>
+
+		<form class="filters" id="filters">
+			<input type="search" id="q" placeholder="Rechercher dans la veille…">
+			<select id="tag" aria-label="Thème"><option value="">Tous les thèmes</option></select>
+			<select id="source" aria-label="Source"><option value="">Toutes les sources</option></select>
+			<select id="min_score" aria-label="Score minimum">
+				<option value="">Tous les scores</option>
+				<option value="3">Score ≥ 3</option><option value="4">Score ≥ 4</option><option value="5">Score 5</option>
+			</select>
+			<button class="primary">Filtrer</button>
+		</form>
+		<div id="count" class="muted"></div>
+		<section id="articles"></section>
+	</div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...children) => {
+	const node = Object.assign(document.createElement(tag), props);
+	node.append(...children);
+	return node;
+};
+// sessionStorage peut être indisponible (navigation privée stricte) : repli en mémoire.
+const session = {
+	value: null,
+	get() { try { return sessionStorage.getItem("veille_token") ?? this.value; } catch { return this.value; } },
+	set(v) { this.value = v; try { v ? sessionStorage.setItem("veille_token", v) : sessionStorage.removeItem("veille_token"); } catch {} },
+};
+
+async function api(path, options = {}) {
+	const res = await fetch(`/api${path}`, { ...options, headers: { Authorization: `Bearer ${session.get()}` } });
+	if (res.status === 401) { session.set(null); showLogin("Jeton refusé."); throw new Error("401"); }
+	return res;
+}
+
+function showLogin(message = "") {
+	$("app").hidden = true;
+	$("login").hidden = false;
+	$("login-error").textContent = message;
+}
+
+function bars(target, record, { limit = 12, label = (k) => k } = {}) {
+	const entries = Object.entries(record).slice(0, limit);
+	const max = Math.max(1, ...entries.map(([, n]) => n));
+	$(target).replaceChildren(
+		...(entries.length ? entries : [["—", 0]]).map(([key, n]) =>
+			el("div", { className: "bar-row", title: `${label(key)} : ${n} article(s)` },
+				el("span", { textContent: label(key) }),
+				el("div", { className: "track" },
+					el("div", { className: "bar", style: `width:${(n / max) * 85}%` }),
+					el("span", { textContent: String(n) }))))
+	);
+}
+
+const shortDate = (iso) => new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+
+async function loadStats() {
+	const s = await (await api("/stats")).json();
+	const tile = (value, label) => el("div", { className: "panel tile" }, el("b", { textContent: String(value) }), el("span", { className: "muted", textContent: label }));
+	$("tiles").replaceChildren(
+		tile(s.total, "articles résumés"),
+		tile(s.averageScore ?? "—", "score moyen / 5"),
+		tile(s.sources, "sources suivies"),
+		tile(s.pending, "en attente de résumé"),
+		tile(s.failed, "résumés en échec"),
+	);
+	bars("chart-week", s.byWeek, { label: (k) => `Sem. du ${shortDate(k)}` });
+	bars("chart-tag", s.byTag);
+	bars("chart-source", s.bySource);
+	bars("chart-score", Object.fromEntries([1, 2, 3, 4, 5].map((n) => [n, s.scoreDistribution[n] ?? 0])), { label: (k) => `${"★".repeat(k)}` });
+	$("status").textContent = s.collecting ? "Collecte en cours… " : s.nextRunAt ? `Prochaine collecte : ${new Date(s.nextRunAt).toLocaleString("fr-FR")} ` : "";
+	const fill = (id, values) => { if ($(id).options.length === 1) $(id).append(...values.map((v) => el("option", { value: v, textContent: v }))); };
+	fill("tag", s.tags);
+	fill("source", Object.keys(s.bySource));
+}
+
+function filterParams() {
+	const params = new URLSearchParams();
+	for (const id of ["tag", "source", "min_score"]) if ($(id).value) params.set(id, $(id).value);
+	return params;
+}
+
+async function loadArticles() {
+	const params = filterParams();
+	const q = $("q").value.trim();
+	if (q) params.set("q", q);
+	params.set("limit", "50");
+	const articles = await (await api(`/articles?${params}`)).json();
+	$("count").textContent = `${articles.length} article(s) affiché(s)${q ? " — triés par pertinence" : " — les plus récents"}`;
+	$("articles").replaceChildren(...articles.map((a) => {
+		const safeUrl = /^https?:\/\//i.test(a.url) ? a.url : "#";
+		return el("article", {},
+			el("h3", {}, el("a", { href: safeUrl, target: "_blank", rel: "noopener noreferrer", textContent: a.title })),
+			el("div", { className: "muted" },
+				`${"★".repeat(a.score)}${"☆".repeat(Math.max(0, 5 - a.score))} · ${a.source} · ${new Date(a.published_at ?? `${a.created_at.replace(" ", "T")}Z`).toLocaleDateString("fr-FR")}`,
+				...a.tags.map((t) => el("span", { className: "tag", textContent: t }))),
+			el("p", { textContent: a.summary ?? "" }));
+	}));
+}
+
+async function download(ext) {
+	const blob = await (await api(`/export.${ext}?${filterParams()}`)).blob();
+	const link = el("a", { href: URL.createObjectURL(blob), download: `veille_export_${new Date().toISOString().slice(0, 10)}.${ext}` });
+	link.click();
+	URL.revokeObjectURL(link.href);
+}
+
+async function start() {
+	if (!session.get()) return showLogin();
+	try {
+		await loadStats();
+		$("login").hidden = true;
+		$("app").hidden = false;
+		await loadArticles();
+	} catch (err) { if (err.message !== "401") showLogin("Serveur injoignable."); }
+}
+
+$("login").addEventListener("submit", (e) => { e.preventDefault(); session.set($("token").value.trim()); start(); });
+$("filters").addEventListener("submit", (e) => { e.preventDefault(); loadArticles(); });
+$("logout").addEventListener("click", () => { session.set(null); showLogin(); });
+$("export-md").addEventListener("click", () => download("md"));
+$("export-csv").addEventListener("click", () => download("csv"));
+$("collect").addEventListener("click", async () => {
+	const res = await api("/collect", { method: "POST" });
+	$("status").textContent = res.status === 202 ? "Collecte lancée… " : "Collecte déjà en cours… ";
+});
+start();
+</script>
+</body>
+</html>
