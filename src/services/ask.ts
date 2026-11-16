@@ -66,7 +66,7 @@ ${local || "(aucun article pertinent)"}
 RÉSULTATS WEB :
 ${remote || "(aucun)"}`;
 
-	const text = (await deps.llm.complete(prompt, { maxTokens: 900 })).trim();
+	const text = (await deps.llm.complete(prompt, { maxTokens: 900, purpose: "ask" })).trim();
 	return { text: text || "Réponse indisponible.", articles, web };
 }
 

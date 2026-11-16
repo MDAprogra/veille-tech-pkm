@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
+import type { Category, Source } from "../sources.js";
 import { migrate } from "./migrations.js";
 
 export const MAX_ATTEMPTS = 3;
@@ -21,6 +22,49 @@ export interface Article {
 	attempts: number;
 	created_at: string;
 	notified_at: string | null;
+	/** Article principal du même sujet (null : cet article est le principal). */
+	cluster_id: number | null;
+	favorite: boolean;
+	dismissed: boolean;
+	read_at: string | null;
+	/** Nombre de sources distinctes ayant couvert ce sujet (1 = lui seul). */
+	coverage: number;
+	/** Autres sources ayant couvert le même sujet. */
+	also_in: string[];
+}
+
+export type SourceStatus = "active" | "disabled" | "suggested" | "rejected";
+
+export interface SourceRow {
+	id: number;
+	name: string;
+	url: string;
+	category: Category;
+	lang: "fr" | "en";
+	status: SourceStatus;
+	origin: "builtin" | "user" | "ai";
+	note: string | null;
+	ai_score: number | null;
+	created_at: string;
+	last_success_at: string | null;
+	last_item_count: number | null;
+	last_error: string | null;
+	last_error_at: string | null;
+	failures: number;
+}
+
+export interface Report {
+	id: number;
+	created_at: string;
+	days: number | null;
+	articles: number;
+	content: string;
+}
+
+export interface UsageTotals {
+	calls: number;
+	prompt_tokens: number;
+	completion_tokens: number;
 }
 
 export interface NewArticle {
@@ -39,6 +83,12 @@ export interface Filters {
 	days?: number;
 	limit?: number;
 	offset?: number;
+	favorite?: boolean;
+	unread?: boolean;
+	/** Inclure les articles marqués « pas pertinent » (exclus par défaut). */
+	includeDismissed?: boolean;
+	/** Inclure les doublons de sujet rattachés à un article principal (exclus par défaut). */
+	includeClustered?: boolean;
 }
 
 export interface Run {
@@ -52,14 +102,39 @@ export interface Run {
 	notified: number;
 	sources_failed: string[];
 	error: string | null;
+	duplicates: number;
+	prompt_tokens: number;
+	completion_tokens: number;
 }
 
 export type RunResult = Pick<
 	Run,
-	"fetched" | "inserted" | "enriched" | "failed" | "notified" | "sources_failed" | "error"
+	| "fetched"
+	| "inserted"
+	| "enriched"
+	| "failed"
+	| "notified"
+	| "sources_failed"
+	| "error"
+	| "duplicates"
+	| "prompt_tokens"
+	| "completion_tokens"
 >;
 
-type Row = Omit<Article, "tags"> & { tags: string };
+type Row = Omit<Article, "tags" | "also_in" | "favorite" | "dismissed"> & {
+	tags: string;
+	also_in: string | null;
+	favorite: number;
+	dismissed: number;
+};
+
+/** Sélection d'articles avec la couverture du sujet par les autres sources. */
+const SELECT = `SELECT a.*,
+	1 + (SELECT COUNT(DISTINCT m.source) FROM articles m
+	     WHERE m.cluster_id = a.id AND m.source <> a.source) AS coverage,
+	(SELECT json_group_array(DISTINCT m.source) FROM articles m
+	 WHERE m.cluster_id = a.id AND m.source <> a.source) AS also_in
+	FROM articles a`;
 type RunRow = Omit<Run, "sources_failed"> & { sources_failed: string };
 
 const STOPWORDS = new Set(
@@ -119,22 +194,71 @@ export class Store {
 	/** Articles à enrichir : nouveaux d'abord, puis échecs n'ayant pas épuisé leurs tentatives. */
 	enrichmentQueue(limit: number): Article[] {
 		return this.rows(
-			`SELECT * FROM articles
-			 WHERE status = 'pending' OR (status = 'failed' AND attempts < ?)
-			 ORDER BY status = 'pending' DESC, created_at DESC, id DESC
+			`${SELECT}
+			 WHERE a.status = 'pending' OR (a.status = 'failed' AND a.attempts < ?)
+			 ORDER BY a.status = 'pending' DESC, a.created_at DESC, a.id DESC
 			 LIMIT ?`,
 			MAX_ATTEMPTS,
 			limit,
 		);
 	}
 
-	markEnriched(id: number, data: { summary: string; score: number; tags: string[] }): void {
+	/**
+	 * Enregistre le résumé. Si `duplicateOf` désigne un article couvrant le même sujet,
+	 * l'article lui est rattaché : il n'apparaît plus dans les listes et n'est pas notifié.
+	 * Retourne true si l'article a été rattaché.
+	 */
+	markEnriched(
+		id: number,
+		data: { summary: string; score: number; tags: string[]; duplicateOf?: number | null },
+	): boolean {
 		this.db
 			.prepare(
 				`UPDATE articles SET summary = ?, score = ?, tags = ?, status = 'done', attempts = attempts + 1
 				 WHERE id = ?`,
 			)
 			.run(data.summary, data.score, JSON.stringify(data.tags), id);
+		if (!data.duplicateOf) return false;
+		const target = this.db
+			.prepare(
+				"SELECT COALESCE(cluster_id, id) AS root FROM articles WHERE id = ? AND status = 'done'",
+			)
+			.get(data.duplicateOf) as { root: number } | undefined;
+		if (!target || target.root === id) return false;
+		// Un article déjà principal d'un groupe emmène ses membres avec lui.
+		this.db
+			.prepare(
+				`UPDATE articles SET cluster_id = ?, notified_at = COALESCE(notified_at, datetime('now'))
+				 WHERE id = ? OR cluster_id = ?`,
+			)
+			.run(target.root, id, id);
+		return true;
+	}
+
+	/**
+	 * Candidats doublons : articles récents d'autres sources dont le titre ou le résumé
+	 * ressemble au titre donné. Chaque candidat est ramené à l'article principal de son groupe.
+	 */
+	similarRecent(
+		article: { id: number; title: string; source: string },
+		{ days = 5, limit = 5 } = {},
+	): Array<{ id: number; title: string; source: string }> {
+		const fts = toFtsQuery(article.title);
+		if (!fts) return [];
+		const rows = this.db
+			.prepare(
+				`SELECT COALESCE(a.cluster_id, a.id) AS root
+				 FROM articles_fts f JOIN articles a ON a.id = f.rowid
+				 WHERE articles_fts MATCH ? AND a.status = 'done' AND a.id <> ? AND a.source <> ?
+				   AND a.created_at >= datetime('now', ?)
+				 ORDER BY bm25(articles_fts, 8.0, 4.0, 0.0) LIMIT ?`,
+			)
+			.all(fts, article.id, article.source, `-${days} days`, limit * 3) as Array<{ root: number }>;
+		const roots = [...new Set(rows.map((r) => r.root))].filter((r) => r !== article.id);
+		const get = this.db.prepare("SELECT id, title, source FROM articles WHERE id = ?");
+		return roots
+			.slice(0, limit)
+			.map((root) => get.get(root) as { id: number; title: string; source: string });
 	}
 
 	markFailed(id: number): void {
@@ -146,10 +270,11 @@ export class Store {
 	/** Articles pertinents jamais notifiés (limités aux 2 derniers jours pour éviter les rafales). */
 	pendingNotifications(minScore: number): Article[] {
 		return this.rows(
-			`SELECT * FROM articles
-			 WHERE status = 'done' AND notified_at IS NULL AND score >= ?
-			   AND created_at >= datetime('now', '-2 days')
-			 ORDER BY score DESC, created_at DESC`,
+			`${SELECT}
+			 WHERE a.status = 'done' AND a.notified_at IS NULL AND a.score >= ?
+			   AND a.cluster_id IS NULL AND a.dismissed = 0
+			   AND a.created_at >= datetime('now', '-2 days')
+			 ORDER BY a.score DESC, a.created_at DESC`,
 			minScore,
 		);
 	}
@@ -174,7 +299,60 @@ export class Store {
 	// ── Lecture ────────────────────────────────────────────────────────────
 
 	get(id: number): Article | undefined {
-		return this.rows("SELECT * FROM articles WHERE id = ?", id)[0];
+		return this.rows(`${SELECT} WHERE a.id = ?`, id)[0];
+	}
+
+	count(filters: Filters = {}): number {
+		const { where, params } = this.where(filters);
+		return (
+			this.db.prepare(`SELECT COUNT(*) AS n FROM articles a WHERE ${where}`).get(...params) as {
+				n: number;
+			}
+		).n;
+	}
+
+	/** Autres articles du même sujet, rattachés à cet article principal. */
+	clusterMembers(id: number): Article[] {
+		return this.rows(`${SELECT} WHERE a.cluster_id = ? ORDER BY a.created_at`, id);
+	}
+
+	/** Articles proches (plein texte sur le titre et les thèmes), hors du même sujet. */
+	related(article: Article, limit = 5): Article[] {
+		const fts = toFtsQuery(`${article.title} ${article.tags.join(" ")}`);
+		if (!fts) return [];
+		const root = article.cluster_id ?? article.id;
+		return this.rows(
+			`${SELECT} JOIN articles_fts f ON f.rowid = a.id
+			 WHERE articles_fts MATCH ? AND a.status = 'done' AND a.cluster_id IS NULL
+			   AND a.dismissed = 0 AND a.id <> ?
+			 ORDER BY bm25(articles_fts, 8.0, 4.0, 0.0) LIMIT ?`,
+			fts,
+			root,
+			limit,
+		);
+	}
+
+	/** Actions de lecture. « Pas pertinent » s'applique à tout le groupe de doublons. */
+	updateArticle(
+		id: number,
+		changes: { favorite?: boolean; read?: boolean; dismissed?: boolean },
+	): Article | undefined {
+		if (changes.favorite !== undefined) {
+			this.db.prepare("UPDATE articles SET favorite = ? WHERE id = ?").run(+changes.favorite, id);
+		}
+		if (changes.read !== undefined) {
+			this.db
+				.prepare(
+					`UPDATE articles SET read_at = ${changes.read ? "datetime('now')" : "NULL"} WHERE id = ?`,
+				)
+				.run(id);
+		}
+		if (changes.dismissed !== undefined) {
+			this.db
+				.prepare("UPDATE articles SET dismissed = ? WHERE id = ? OR cluster_id = ?")
+				.run(+changes.dismissed, id, id);
+		}
+		return this.get(id);
 	}
 
 	/** Articles enrichis, du plus récent au plus ancien. */
@@ -183,7 +361,7 @@ export class Store {
 		const paging = filters.limit ? "LIMIT ? OFFSET ?" : "";
 		const pagingParams = filters.limit ? [filters.limit, filters.offset ?? 0] : [];
 		return this.rows(
-			`SELECT a.* FROM articles a WHERE ${where} ORDER BY a.created_at DESC, a.id DESC ${paging}`,
+			`${SELECT} WHERE ${where} ORDER BY a.created_at DESC, a.id DESC ${paging}`,
 			...params,
 			...pagingParams,
 		);
@@ -193,8 +371,8 @@ export class Store {
 	top(filters: Filters = {}): Article[] {
 		const { where, params } = this.where(filters);
 		return this.rows(
-			`SELECT a.* FROM articles a WHERE ${where}
-			 ORDER BY a.score DESC, a.created_at DESC, a.id DESC LIMIT ?`,
+			`${SELECT} WHERE ${where}
+			 ORDER BY a.score DESC, coverage DESC, a.created_at DESC, a.id DESC LIMIT ?`,
 			...params,
 			filters.limit ?? 10,
 		);
@@ -204,16 +382,44 @@ export class Store {
 	search(query: string, filters: Filters = {}): Article[] {
 		const fts = toFtsQuery(query);
 		if (!fts) return [];
-		const { where, params } = this.where(filters);
-		return this.rows(
-			`SELECT a.* FROM articles_fts f JOIN articles a ON a.id = f.rowid
-			 WHERE articles_fts MATCH ? AND ${where}
-			 ORDER BY bm25(articles_fts, 8.0, 4.0, 1.0), a.created_at DESC
-			 LIMIT ?`,
-			fts,
-			...params,
-			filters.limit ?? 5,
-		);
+		// La recherche porte aussi sur les doublons, puis chaque résultat est ramené à son article principal.
+		const { where, params } = this.where({ ...filters, includeClustered: true });
+		const limit = filters.limit ?? 5;
+		const matches = this.db
+			.prepare(
+				`SELECT COALESCE(a.cluster_id, a.id) AS root
+				 FROM articles_fts f JOIN articles a ON a.id = f.rowid
+				 WHERE articles_fts MATCH ? AND ${where}
+				 ORDER BY bm25(articles_fts, 8.0, 4.0, 1.0), a.created_at DESC
+				 LIMIT ? OFFSET ?`,
+			)
+			.all(fts, ...params, limit * 3, filters.offset ?? 0) as Array<{ root: number }>;
+		const roots = [...new Set(matches.map((m) => m.root))].slice(0, limit);
+		return roots.map((id) => this.get(id)).filter((a): a is Article => a !== undefined);
+	}
+
+	/** Articles par semaine et par thème, sur les N dernières semaines (lundi UTC en clé). */
+	trends(weeks: number): {
+		byTag: Array<{ week: string; tag: string; n: number }>;
+		total: Array<{ week: string; n: number }>;
+	} {
+		const since = `-${weeks * 7} days`;
+		return {
+			byTag: this.db
+				.prepare(
+					`SELECT date(a.created_at, 'weekday 0', '-6 days') AS week, j.value AS tag, COUNT(*) AS n
+					 FROM articles a, json_each(a.tags) j
+					 WHERE a.status = 'done' AND a.created_at >= datetime('now', ?)
+					 GROUP BY week, tag`,
+				)
+				.all(since) as Array<{ week: string; tag: string; n: number }>,
+			total: this.db
+				.prepare(
+					`SELECT date(created_at, 'weekday 0', '-6 days') AS week, COUNT(*) AS n FROM articles
+					 WHERE status = 'done' AND created_at >= datetime('now', ?) GROUP BY week`,
+				)
+				.all(since) as Array<{ week: string; n: number }>,
+		};
 	}
 
 	stats() {
@@ -268,7 +474,8 @@ export class Store {
 		this.db
 			.prepare(
 				`UPDATE runs SET finished_at = datetime('now'), fetched = @fetched, inserted = @inserted,
-				 enriched = @enriched, failed = @failed, notified = @notified,
+				 enriched = @enriched, failed = @failed, notified = @notified, duplicates = @duplicates,
+				 prompt_tokens = @prompt_tokens, completion_tokens = @completion_tokens,
 				 sources_failed = @sources_failed, error = @error WHERE id = @id`,
 			)
 			.run({ ...result, sources_failed: JSON.stringify(result.sources_failed), id });
@@ -284,6 +491,166 @@ export class Store {
 	runCount(): number {
 		return (this.db.prepare("SELECT COUNT(*) AS n FROM runs").get() as { n: number }).n;
 	}
+
+	// ── Sources ────────────────────────────────────────────────────────────
+
+	sources(status?: SourceStatus): SourceRow[] {
+		const sql = `SELECT * FROM sources ${status ? "WHERE status = ?" : ""} ORDER BY status, category, name`;
+		return this.db.prepare(sql).all(...(status ? [status] : [])) as SourceRow[];
+	}
+
+	activeSources(): Source[] {
+		return this.sources("active").map(({ name, url, category, lang }) => ({
+			name,
+			url,
+			category,
+			lang,
+		}));
+	}
+
+	source(id: number): SourceRow | undefined {
+		return this.db.prepare("SELECT * FROM sources WHERE id = ?").get(id) as SourceRow | undefined;
+	}
+
+	sourceByUrl(url: string): SourceRow | undefined {
+		return this.db.prepare("SELECT * FROM sources WHERE url = ?").get(url) as SourceRow | undefined;
+	}
+
+	/** Ajoute une source. Retourne undefined si l'URL est déjà connue (quel que soit son statut). */
+	addSource(source: {
+		name: string;
+		url: string;
+		category?: Category;
+		lang?: "fr" | "en";
+		status?: SourceStatus;
+		origin?: "user" | "ai";
+		note?: string | null;
+		ai_score?: number | null;
+	}): SourceRow | undefined {
+		const result = this.db
+			.prepare(
+				`INSERT OR IGNORE INTO sources (name, url, category, lang, status, origin, note, ai_score)
+				 VALUES (@name, @url, @category, @lang, @status, @origin, @note, @ai_score)`,
+			)
+			.run({
+				category: "web",
+				lang: "en",
+				status: "active",
+				origin: "user",
+				note: null,
+				ai_score: null,
+				...source,
+			});
+		return result.changes > 0 ? this.source(Number(result.lastInsertRowid)) : undefined;
+	}
+
+	setSourceStatus(id: number, status: SourceStatus): SourceRow | undefined {
+		this.db.prepare("UPDATE sources SET status = ?, failures = 0 WHERE id = ?").run(status, id);
+		return this.source(id);
+	}
+
+	deleteSource(id: number): boolean {
+		return this.db.prepare("DELETE FROM sources WHERE id = ?").run(id).changes > 0;
+	}
+
+	/** Résultat de la dernière lecture d'un flux (état de santé de la source). */
+	recordSourceResult(
+		url: string,
+		result: { ok: true; items: number } | { ok: false; error: string },
+	): void {
+		if (result.ok) {
+			this.db
+				.prepare(
+					`UPDATE sources SET last_success_at = datetime('now'), last_item_count = ?, failures = 0
+					 WHERE url = ?`,
+				)
+				.run(result.items, url);
+		} else {
+			this.db
+				.prepare(
+					`UPDATE sources SET last_error = ?, last_error_at = datetime('now'), failures = failures + 1
+					 WHERE url = ?`,
+				)
+				.run(result.error.slice(0, 300), url);
+		}
+	}
+
+	// ── Consommation de l'IA ───────────────────────────────────────────────
+
+	addUsage(purpose: string, promptTokens: number, completionTokens: number): void {
+		this.db
+			.prepare(
+				`INSERT INTO llm_usage (day, purpose, calls, prompt_tokens, completion_tokens)
+				 VALUES (date('now'), ?, 1, ?, ?)
+				 ON CONFLICT(day, purpose) DO UPDATE SET calls = calls + 1,
+				   prompt_tokens = prompt_tokens + excluded.prompt_tokens,
+				   completion_tokens = completion_tokens + excluded.completion_tokens`,
+			)
+			.run(purpose, promptTokens, completionTokens);
+	}
+
+	/** Totaux de tokens depuis une date SQLite (ex. `start of month`), éventuellement pour un usage. */
+	usageTotals(since: "today" | "month" | "all", purpose?: string): UsageTotals {
+		const from =
+			since === "today"
+				? "date('now')"
+				: since === "month"
+					? "date('now', 'start of month')"
+					: "'0000'";
+		return this.db
+			.prepare(
+				`SELECT COALESCE(SUM(calls), 0) AS calls, COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+				        COALESCE(SUM(completion_tokens), 0) AS completion_tokens
+				 FROM llm_usage WHERE day >= ${from} ${purpose ? "AND purpose = ?" : ""}`,
+			)
+			.get(...(purpose ? [purpose] : [])) as UsageTotals;
+	}
+
+	usageByPurpose(since: "month" | "all" = "month"): Array<UsageTotals & { purpose: string }> {
+		const from = since === "month" ? "date('now', 'start of month')" : "'0000'";
+		return this.db
+			.prepare(
+				`SELECT purpose, SUM(calls) AS calls, SUM(prompt_tokens) AS prompt_tokens,
+				        SUM(completion_tokens) AS completion_tokens
+				 FROM llm_usage WHERE day >= ${from} GROUP BY purpose ORDER BY prompt_tokens DESC`,
+			)
+			.all() as Array<UsageTotals & { purpose: string }>;
+	}
+
+	usageByDay(days = 30): Array<UsageTotals & { day: string }> {
+		return this.db
+			.prepare(
+				`SELECT day, SUM(calls) AS calls, SUM(prompt_tokens) AS prompt_tokens,
+				        SUM(completion_tokens) AS completion_tokens
+				 FROM llm_usage WHERE day >= date('now', ?) GROUP BY day ORDER BY day`,
+			)
+			.all(`-${days} days`) as Array<UsageTotals & { day: string }>;
+	}
+
+	// ── Rapports ───────────────────────────────────────────────────────────
+
+	addReport(report: { days: number | null; articles: number; content: string }): Report {
+		const { lastInsertRowid } = this.db
+			.prepare("INSERT INTO reports (days, articles, content) VALUES (@days, @articles, @content)")
+			.run(report);
+		return this.report(Number(lastInsertRowid)) as Report;
+	}
+
+	report(id: number): Report | undefined {
+		return this.db.prepare("SELECT * FROM reports WHERE id = ?").get(id) as Report | undefined;
+	}
+
+	reports(limit = 30): Array<Omit<Report, "content">> {
+		return this.db
+			.prepare("SELECT id, created_at, days, articles FROM reports ORDER BY id DESC LIMIT ?")
+			.all(limit) as Array<Omit<Report, "content">>;
+	}
+
+	deleteReport(id: number): boolean {
+		return this.db.prepare("DELETE FROM reports WHERE id = ?").run(id).changes > 0;
+	}
+
+	// ── Divers ─────────────────────────────────────────────────────────────
 
 	getMeta(key: string): string | undefined {
 		const row = this.db.prepare("SELECT value FROM meta WHERE key = ?").get(key) as
@@ -305,6 +672,11 @@ export class Store {
 	private where(filters: Filters): { where: string; params: unknown[] } {
 		const clauses = ["a.status = 'done'"];
 		const params: unknown[] = [];
+		// Un favori reste visible même s'il est rattaché à un autre article.
+		if (!filters.includeClustered && !filters.favorite) clauses.push("a.cluster_id IS NULL");
+		if (!filters.includeDismissed) clauses.push("a.dismissed = 0");
+		if (filters.favorite) clauses.push("a.favorite = 1");
+		if (filters.unread) clauses.push("a.read_at IS NULL");
 		if (filters.minScore) {
 			clauses.push("a.score >= ?");
 			params.push(filters.minScore);
@@ -326,7 +698,13 @@ export class Store {
 
 	private rows(sql: string, ...params: unknown[]): Article[] {
 		const rows = this.db.prepare(sql).all(...params) as Row[];
-		return rows.map((r) => ({ ...r, tags: safeJsonArray(r.tags) }));
+		return rows.map((r) => ({
+			...r,
+			tags: safeJsonArray(r.tags),
+			also_in: safeJsonArray(r.also_in ?? "[]"),
+			favorite: r.favorite === 1,
+			dismissed: r.dismissed === 1,
+		}));
 	}
 }
 

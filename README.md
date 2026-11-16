@@ -11,7 +11,7 @@ Système de **PKM (Personal Knowledge Management)** automatisé : il collecte de
 ## 1. Architecture
 
 ```
-16 flux RSS ──► Collecte ──► Déduplication ──► Mistral AI 🇫🇷 ──► SQLite + index FTS5
+Flux RSS ─────► Collecte ──► Déduplication ──► Mistral AI 🇫🇷 ──► SQLite + index FTS5
  (toutes les 2 h,            (seuls les          (résumé FR,        (volume Fly.io)
   9 h–19 h Paris)             nouveaux)           score 1-5, thèmes)      │
                                                                          ▼
@@ -43,9 +43,16 @@ Un seul processus Node.js, hébergé sur **Fly.io (Paris, cdg)**.
 1. **Lecture des flux** — 5 articles max par source ; une source en panne n'interrompt pas les autres.
 2. **Déduplication avant tout appel IA** — les URL sont nettoyées (paramètres `utm_*`, ancre) et seuls les articles inconnus sont insérés, avec le statut `pending`.
 3. **Enrichissement** — pour chaque article en file, Mistral renvoie un JSON validé : résumé en français, score de pertinence 1-5, 1 à 3 thèmes pris dans une liste fermée (`src/sources.ts`).
+   **Doublons de sujet** : si d'autres sources ont publié un article proche dans les 5 derniers jours, ils sont soumis au modèle dans le même appel ; s'il confirme qu'il s'agit de la même annonce, l'article est rattaché au premier. Il disparaît des listes et n'est pas notifié, et l'article principal affiche « couvert par N sources ».
 4. **Reprise sur erreur** — une réponse inexploitable marque l'article `failed`, retenté aux collectes suivantes (3 essais max). Une panne de Mistral (quota, clé, réseau) interrompt l'enrichissement sans pénaliser les articles : ils restent en file.
 5. **Notification** — les articles de score ≥ 4 jamais notifiés partent sur Telegram, regroupés par source.
-6. **Historique** — chaque collecte est enregistrée dans la table `runs` (visible dans `/infos`, `/logs`, `/api/runs`).
+6. **Historique** — chaque collecte est enregistrée dans la table `runs` avec ses compteurs et les tokens consommés (visible dans `/infos`, `/logs`, la page Système).
+
+Les **sources** sont en base : elles s'ajoutent, se désactivent et se suppriment depuis le tableau de bord, sans redéploiement. L'état de chaque flux (dernière lecture réussie, erreurs consécutives) est suivi à chaque collecte.
+
+**Propositions de sources par l'IA** (`src/services/sources.ts`) : le modèle propose des flux d'après les sources suivies et les thèmes peu couverts ; chaque flux est ensuite réellement lu (il doit exister, contenir des articles et être actif depuis moins de 45 jours), puis le modèle le note d'après ses vrais derniers titres. Les flux retenus attendent une validation humaine : aucun n'est collecté sans accord.
+
+**Coût de l'IA** : les tokens de chaque appel sont enregistrés par jour et par usage (résumés, questions, analyses, propositions de sources). Le coût est estimé avec `LLM_PRICE_INPUT` et `LLM_PRICE_OUTPUT` (dollars par million de tokens).
 
 Chaque lundi, après la première collecte, un **digest hebdomadaire** (analyse des 7 derniers jours) est envoyé sur Telegram.
 
@@ -58,6 +65,7 @@ Détails : [docs/pipeline-donnees.md](docs/pipeline-donnees.md) · [docs/databas
 | Commande | Effet |
 |---|---|
 | `/summary [thème ou mots]` | 5 derniers articles, éventuellement filtrés (`/summary react`) |
+| `/favoris` | Articles marqués comme favoris depuis le tableau de bord |
 | `/top [jours]` | Meilleurs articles de la période (7 jours par défaut) |
 | `/search mots-clés` | Recherche plein texte classée par pertinence |
 | `/ask question` | Réponse RAG : recherche dans la veille, complément web si moins de 2 résultats, synthèse Mistral avec sources citées |
@@ -78,15 +86,32 @@ Toutes les routes `/api/*` exigent `Authorization: Bearer <DASHBOARD_TOKEN>`.
 |---|---|
 | `GET /health` | Sonde de santé (publique) |
 | `GET /` | Tableau de bord web (demande le jeton) |
-| `GET /api/articles` | Articles résumés. Filtres : `q`, `tag`, `source`, `min_score`, `days`, `limit`, `offset` |
+| `GET /api/articles` | Articles résumés. Filtres : `q`, `tag`, `source`, `min_score`, `days`, `favorite`, `unread`, `dismissed`, `limit`, `offset`. L'en-tête `X-Total-Count` donne le total pour la pagination |
+| `GET /api/articles/:id` | Fiche : article, autres sources du même sujet, articles proches |
+| `PATCH /api/articles/:id` | Actions : `{ "favorite": true, "read": true, "dismissed": false }` |
+| `GET /api/trends?weeks=12` | Articles par thème et par semaine |
+| `GET/POST /api/reports`, `GET/DELETE /api/reports/:id` | Rapports de tendances générés par l'IA, archivés en Markdown |
+| `GET/POST /api/sources`, `PATCH/DELETE /api/sources/:id` | Gestion des sources (le flux est vérifié à l'ajout) |
+| `POST /api/sources/suggest` | Lance une recherche de nouvelles sources par l'IA (tâche de fond) |
+| `GET /api/system` | État du système : collectes, sources, consommation de l'IA, événements |
 | `GET /api/articles/recent?limit=10` | Derniers articles |
 | `GET /api/articles/search?q=…` | Recherche plein texte |
-| `GET /api/stats` | Volumes, score moyen, répartition par source, thème, score, semaine |
+| `GET /api/stats` | Volumes, score moyen, répartition par source, thème, score, semaine, coût de l'IA |
 | `GET /api/runs` | Historique des collectes |
 | `GET /api/export.md`, `/api/export.csv` | Exports (mêmes filtres) |
 | `POST /api/collect` | Lance une collecte |
 
 ---
+
+### Tableau de bord
+
+| Onglet | Contenu |
+|---|---|
+| **Articles** | Liste paginée, recherche, filtres (thème, source, score, favoris, non lus), exports. Un clic sur un titre ouvre la fiche : résumé, actions (favori, lu, pas pertinent), autres sources du même sujet, articles proches |
+| **Tendances** | Un graphique par thème, semaine par semaine, à échelle commune, avec la tendance récente ; répartition par source et par score |
+| **Rapport** | Génération d'une analyse de tendances sur une période choisie, archivage, export Markdown |
+| **Sources** | Ajout d'un flux (ou d'un site, dont le flux est recherché), activation, suppression, état de santé, propositions de l'IA à valider |
+| **Système** | Coût et consommation de l'IA, historique des collectes, configuration, événements récents |
 
 ## 5. Serveur MCP (Claude)
 
@@ -133,9 +158,9 @@ src/
 ├── db/                   SQLite : migrations versionnées, requêtes, FTS5
 ├── llm/                  Clients Mistral et compatible OpenAI : cadence, retry avec backoff
 ├── pipeline/             collect → enrich → run, planificateur
-├── services/             ask (RAG), analyze, mise en forme et exports
+├── services/             ask (RAG), analyze, rapports, sources, coût, exports
 └── interfaces/           telegram, http (API + tableau de bord), mcp
-public/index.html         Tableau de bord (un fichier, sans dépendance)
+public/                   Tableau de bord (HTML, CSS, JavaScript sans dépendance)
 tests/                    Tests d'intégration (base en mémoire, faux LLM)
 ```
 
@@ -180,7 +205,7 @@ Seuls des contenus publics (titres, extraits, URL) sont collectés : aucune donn
 
 ## 10. Pistes d'évolution
 
+- Résumés à partir du texte complet des articles plutôt que de l'extrait du flux
 - Recherche sémantique (embeddings `mistral-embed`) en complément de FTS5
-- Sources YouTube (transcriptions) et sources configurables sans redéploiement
+- Sources YouTube (transcriptions)
 - Sauvegarde automatique de la base hors du volume
-- Analyse de tendances dans le temps (évolution des thèmes par semaine)

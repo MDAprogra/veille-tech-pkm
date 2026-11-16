@@ -25,6 +25,9 @@ export function articleMarkdown(a: Article): string {
 		`- **Date** : ${frenchDate(a.published_at ?? a.created_at)}`,
 		`- **Score** : ${a.score}/5`,
 		...(a.tags.length ? [`- **Thèmes** : ${a.tags.join(", ")}`] : []),
+		...(a.coverage > 1
+			? [`- **Couverture** : ${a.coverage} sources (aussi : ${a.also_in.join(", ")})`]
+			: []),
 		`- **Lien** : ${a.url}`,
 		"",
 		`**Résumé** : ${a.summary ?? "—"}`,
@@ -44,7 +47,7 @@ function csvCell(value: unknown): string {
 
 /** Export tabulaire (dataset pour analyse ou entraînement d'un modèle). */
 export function exportCsv(articles: Article[]): string {
-	const header = "id,title,url,source,score,tags,published_at,created_at,summary";
+	const header = "id,title,url,source,score,tags,published_at,created_at,summary,coverage,favorite";
 	const lines = articles.map((a) =>
 		[
 			a.id,
@@ -56,6 +59,8 @@ export function exportCsv(articles: Article[]): string {
 			a.published_at,
 			a.created_at,
 			a.summary,
+			a.coverage,
+			a.favorite ? 1 : 0,
 		]
 			.map(csvCell)
 			.join(","),

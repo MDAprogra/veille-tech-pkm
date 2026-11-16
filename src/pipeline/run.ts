@@ -7,7 +7,8 @@ import { enrichArticle, InvalidLlmOutput } from "./enrich.js";
 
 export interface PipelineDeps {
 	store: Store;
-	sources: Source[];
+	/** Par défaut : les sources actives enregistrées en base. */
+	sources?: Source[];
 	fetchFeed: FeedFetcher;
 	/** Sans LLM, les articles sont collectés et restent en file d'attente. */
 	llm?: Llm;
@@ -34,12 +35,24 @@ export async function runPipeline(deps: PipelineDeps): Promise<RunResult> {
 		notified: 0,
 		sources_failed: [],
 		error: null,
+		duplicates: 0,
+		prompt_tokens: 0,
+		completion_tokens: 0,
 	};
+	const usageBefore = store.usageTotals("all", "enrich");
 
 	try {
-		const { articles, failedSources } = await collectFeeds(deps.sources, deps.fetchFeed, {
-			itemsPerSource: deps.itemsPerSource,
-		});
+		const { articles, failedSources, results } = await collectFeeds(
+			deps.sources ?? store.activeSources(),
+			deps.fetchFeed,
+			{ itemsPerSource: deps.itemsPerSource },
+		);
+		for (const r of results) {
+			store.recordSourceResult(
+				r.source.url,
+				r.ok ? { ok: true, items: r.items } : { ok: false, error: r.error ?? "erreur inconnue" },
+			);
+		}
 		result.fetched = articles.length;
 		result.sources_failed = failedSources;
 
@@ -53,7 +66,10 @@ export async function runPipeline(deps: PipelineDeps): Promise<RunResult> {
 		if (deps.llm) {
 			for (const article of store.enrichmentQueue(deps.maxEnrichPerRun)) {
 				try {
-					store.markEnriched(article.id, await enrichArticle(deps.llm, article));
+					// Doublons de sujet : seuls les articles récents sont comparés aux autres sources.
+					const candidates = isRecent(article.created_at) ? store.similarRecent(article) : [];
+					const enrichment = await enrichArticle(deps.llm, article, candidates);
+					if (store.markEnriched(article.id, enrichment)) result.duplicates++;
 					result.enriched++;
 				} catch (err) {
 					if (!(err instanceof InvalidLlmOutput)) {
@@ -83,10 +99,21 @@ export async function runPipeline(deps: PipelineDeps): Promise<RunResult> {
 		log.error("Collecte interrompue", err);
 	}
 
+	const usageAfter = store.usageTotals("all", "enrich");
+	result.prompt_tokens = usageAfter.prompt_tokens - usageBefore.prompt_tokens;
+	result.completion_tokens = usageAfter.completion_tokens - usageBefore.completion_tokens;
 	store.finishRun(runId, result);
 	log.info(
-		`✅ Collecte terminée — ${result.inserted} nouveaux, ${result.enriched} résumés, ${result.failed} échecs, ${result.notified} notifiés` +
+		`✅ Collecte terminée — ${result.inserted} nouveaux, ${result.enriched} résumés (${result.duplicates} doublons de sujet), ${result.failed} échecs, ${result.notified} notifiés` +
 			(result.sources_failed.length ? ` — sources KO : ${result.sources_failed.join(", ")}` : ""),
 	);
 	return result;
+}
+
+const RECENT_DAYS = 5;
+
+/** `created_at` est une date SQLite en UTC (« 2026-06-15 08:00:00 »). */
+function isRecent(createdAt: string): boolean {
+	const date = new Date(`${createdAt.replace(" ", "T")}Z`);
+	return Date.now() - date.getTime() < RECENT_DAYS * 86_400_000;
 }

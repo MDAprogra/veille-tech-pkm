@@ -25,6 +25,13 @@ const int = (fallback: number, min = 0) =>
 		.transform((v) => (v === undefined || v === "" ? fallback : Number(v)))
 		.pipe(z.number().int().min(min));
 
+const price = (fallback: number) =>
+	z
+		.string()
+		.optional()
+		.transform((v) => (v === undefined || v.trim() === "" ? fallback : Number(v.replace(",", "."))))
+		.pipe(z.number().min(0));
+
 const hours = z
 	.string()
 	.optional()
@@ -42,6 +49,8 @@ const schema = z.object({
 	LLM_BASE_URL: optional,
 	LLM_API_KEY: optional,
 	LLM_MODEL: optional,
+	LLM_PRICE_INPUT: price(0.17),
+	LLM_PRICE_OUTPUT: price(0.66),
 	TELEGRAM_BOT_TOKEN: optional,
 	TELEGRAM_CHAT_ID: optional,
 	TELEGRAM_PUBLIC: bool(false),
@@ -92,6 +101,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
 			/** Si false (défaut), seul TELEGRAM_CHAT_ID peut utiliser le bot. */
 			public: e.TELEGRAM_PUBLIC,
 		},
+		/** Prix du modèle en dollars par million de tokens, pour estimer le coût. */
+		llmPrice: { input: e.LLM_PRICE_INPUT, output: e.LLM_PRICE_OUTPUT },
 		tavily: { apiKey: e.TAVILY_API_KEY },
 		http: { port: e.PORT, dashboardToken: e.DASHBOARD_TOKEN, mcpToken: e.MCP_TOKEN },
 		db: { path: e.DB_PATH ?? "./data/veille.db" },

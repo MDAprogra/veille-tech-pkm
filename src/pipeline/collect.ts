@@ -50,7 +50,7 @@ export interface FeedItem {
 	pubDate?: string;
 }
 
-export type FeedFetcher = (url: string) => Promise<{ items: FeedItem[] }>;
+export type FeedFetcher = (url: string) => Promise<{ title?: string; items: FeedItem[] }>;
 
 export function createFeedFetcher(): FeedFetcher {
 	const parser = new RSSParser({
@@ -67,6 +67,8 @@ export interface CollectResult {
 	/** Article + URL brute du flux (pour reconnaître les articles stockés avant la canonicalisation). */
 	articles: Array<NewArticle & { rawUrl: string }>;
 	failedSources: string[];
+	/** Résultat de la lecture de chaque flux, pour le suivi de santé des sources. */
+	results: Array<{ source: Source; ok: boolean; items: number; error?: string }>;
 }
 
 export async function collectFeeds(
@@ -76,6 +78,7 @@ export async function collectFeeds(
 ): Promise<CollectResult> {
 	const articles: CollectResult["articles"] = [];
 	const failedSources: string[] = [];
+	const results: CollectResult["results"] = [];
 	const seen = new Set<string>();
 	const queue = [...sources];
 
@@ -83,6 +86,7 @@ export async function collectFeeds(
 		for (let source = queue.shift(); source; source = queue.shift()) {
 			try {
 				const feed = await fetchFeed(source.url);
+				results.push({ source, ok: true, items: feed.items.length });
 				for (const item of feed.items.slice(0, source.limit ?? itemsPerSource)) {
 					if (!item.link) continue;
 					const url = canonicalUrl(item.link);
@@ -99,11 +103,17 @@ export async function collectFeeds(
 				}
 			} catch (err) {
 				failedSources.push(source.name);
+				results.push({
+					source,
+					ok: false,
+					items: 0,
+					error: err instanceof Error ? err.message : String(err),
+				});
 				log.error(`Source en échec : ${source.name}`, err);
 			}
 		}
 	}
 
 	await Promise.all(Array.from({ length: Math.min(concurrency, sources.length) }, worker));
-	return { articles, failedSources };
+	return { articles, failedSources, results };
 }

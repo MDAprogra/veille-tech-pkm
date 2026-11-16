@@ -6,11 +6,13 @@ import type { Article, RunResult } from "../db/store.js";
 import { log } from "../logger.js";
 import { analyze } from "../services/analyze.js";
 import { ask, formatAnswer } from "../services/ask.js";
+import { usageSummary } from "../services/cost.js";
 import { chunk, exportCsv, exportMarkdown, frenchDate, stars } from "../services/format.js";
-import { SOURCES, TAGS } from "../sources.js";
+import { TAGS } from "../sources.js";
 
 const COMMANDS = [
 	["summary", "Derniers articles — /summary [thème]"],
+	["favoris", "Articles marqués comme favoris"],
 	["top", "Meilleurs articles de la semaine — /top [jours]"],
 	["search", "Recherche plein texte — /search mots-clés"],
 	["ask", "Question sur la veille — /ask question"],
@@ -35,6 +37,9 @@ export function articleHtml(a: Article, summaryLength = 600): string {
 	return [
 		`${stars(a.score)} <b>${escapeHtml(a.title)}</b>`,
 		`📰 ${escapeHtml(a.source)}${escapeHtml(tags)}`,
+		...(a.coverage > 1
+			? [`📡 Couvert par ${a.coverage} sources (aussi : ${escapeHtml(a.also_in.join(", "))})`]
+			: []),
 		`📝 ${escapeHtml(short)}`,
 		`🔗 ${escapeHtml(a.url)}`,
 	].join("\n");
@@ -60,6 +65,7 @@ export function runSummary(result: RunResult): string {
 		`✅ Collecte terminée`,
 		`• ${result.fetched} articles lus, ${result.inserted} nouveaux`,
 		`• ${result.enriched} résumés, ${result.failed} échecs`,
+		`• ${result.duplicates} doublons de sujet regroupés`,
 		`• ${result.notified} notifiés`,
 	];
 	if (result.sources_failed.length)
@@ -129,6 +135,17 @@ export function createTelegram(app: App, token: string): TelegramInterface {
 			ctx,
 			articles.map((a) => articleHtml(a)),
 		);
+	});
+
+	bot.command("favoris", async (ctx) => {
+		const articles = store.list({ favorite: true, limit: 10 });
+		if (articles.length === 0) {
+			await ctx.reply(
+				"📭 Aucun favori. Ils se marquent depuis la fiche d'un article, sur le tableau de bord.",
+			);
+			return;
+		}
+		await sendHtml(ctx, ["⭐ <b>Favoris</b>", ...articles.map((a) => articleHtml(a, 300))]);
 	});
 
 	bot.command("top", async (ctx) => {
@@ -241,6 +258,11 @@ export function createTelegram(app: App, token: string): TelegramInterface {
 
 	bot.command("infos", async (ctx) => {
 		const stats = store.stats();
+		const usage = usageSummary(store, config.llmPrice);
+		const sources = store.sources();
+		const active = sources.filter((s) => s.status === "active");
+		const failing = active.filter((s) => s.failures >= 3).length;
+		const suggested = sources.filter((s) => s.status === "suggested").length;
 		const [lastRun] = store.runs(1);
 		const next = app.scheduler.nextRunAt;
 		const fmt = (d: Date) => d.toLocaleString("fr-FR", { timeZone: config.pipeline.timezone });
@@ -266,8 +288,9 @@ export function createTelegram(app: App, token: string): TelegramInterface {
 				`└ Toutes les ${config.pipeline.intervalMinutes} min, ${start}h–${end}h (Paris)`,
 				"",
 				"📡 Système",
-				`├ Sources : ${SOURCES.length}`,
+				`├ Sources : ${active.length} actives${failing ? `, dont ${failing} en panne` : ""}${suggested ? ` · ${suggested} proposition(s) à valider` : ""}`,
 				`├ IA : ${app.llmLabel ?? "non configurée"}`,
+				`├ Coût IA du mois : ${usage.month.cost.toFixed(2)} $ (${usage.month.calls} appels) · aujourd'hui ${usage.today.cost.toFixed(2)} $`,
 				`├ Recherche web : ${app.webSearch ? "Tavily" : "désactivée"}`,
 				`└ En ligne depuis : ${fmt(app.startedAt)}`,
 			].join("\n"),

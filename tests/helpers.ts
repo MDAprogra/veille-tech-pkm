@@ -79,7 +79,7 @@ export function seed(
 	return id;
 }
 
-export function testApp(env: Record<string, string> = {}): App {
+export function testApp(env: Record<string, string> = {}, overrides: Partial<App> = {}): App {
 	const config = loadConfig({ DASHBOARD_TOKEN: "secret", ...env });
 	const store = new Store(":memory:");
 	const scheduler = new Scheduler({
@@ -94,7 +94,18 @@ export function testApp(env: Record<string, string> = {}): App {
 			notified: 0,
 			sources_failed: [],
 			error: null,
+			duplicates: 0,
+			prompt_tokens: 0,
+			completion_tokens: 0,
 		}),
 	});
-	return { config, store, scheduler, startedAt: new Date() };
+	return {
+		config,
+		store,
+		scheduler,
+		fetchFeed: fakeFeed([]),
+		fetchText: async () => "",
+		startedAt: new Date(),
+		...overrides,
+	};
 }
