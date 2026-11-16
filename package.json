@@ -1,35 +1,45 @@
 {
-  "name": "veille_tech",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "module",
-  "devDependencies": {
-    "@biomejs/biome": "2.5.0",
-    "@types/better-sqlite3": "7.6.13",
-    "@types/cors": "2.8.19",
-    "@types/express": "5.0.6",
-    "@types/node": "25.9.3",
-    "@types/node-telegram-bot-api": "0.64.15",
-    "tsx": "4.22.4",
-    "typescript": "6.0.3"
-  },
-  "dependencies": {
-    "@mistralai/mistralai": "2.2.5",
-    "@modelcontextprotocol/sdk": "1.30.0",
-    "@tavily/core": "0.7.6",
-    "better-sqlite3": "12.10.1",
-    "cors": "2.8.6",
-    "dotenv": "17.4.2",
-    "express": "5.2.1",
-    "node-telegram-bot-api": "1.1.0",
-    "rss-parser": "3.13.0",
-    "zod": "4.6.5"
-  }
+	"name": "veille_tech",
+	"version": "2.0.0",
+	"description": "PKM de veille technologique : collecte RSS, résumés Mistral AI, SQLite, bot Telegram, API et MCP",
+	"main": "dist/index.js",
+	"scripts": {
+		"dev": "tsx watch src/index.ts",
+		"start": "node dist/index.js",
+		"build": "tsc -p tsconfig.build.json",
+		"typecheck": "tsc --noEmit",
+		"lint": "biome check .",
+		"format": "biome check --write .",
+		"test": "node --import tsx --test \"tests/*.test.ts\"",
+		"check": "npm run lint && npm run typecheck && npm test",
+		"requeue": "tsx scripts/requeue.ts"
+	},
+	"keywords": [],
+	"author": "",
+	"license": "ISC",
+	"type": "module",
+	"devDependencies": {
+		"@biomejs/biome": "2.5.0",
+		"@types/better-sqlite3": "7.6.13",
+		"@types/cors": "2.8.19",
+		"@types/express": "5.0.6",
+		"@types/node": "25.9.3",
+		"tsx": "4.22.4",
+		"typescript": "6.0.3"
+	},
+	"dependencies": {
+		"@mistralai/mistralai": "2.2.5",
+		"@modelcontextprotocol/sdk": "1.30.0",
+		"@tavily/core": "0.7.6",
+		"better-sqlite3": "12.10.1",
+		"cors": "2.8.6",
+		"express": "5.2.1",
+		"grammy": "1.46.0",
+		"rss-parser": "3.13.0",
+		"zod": "4.6.5"
+	},
+	"private": true,
+	"engines": {
+		"node": ">=22"
+	}
 }

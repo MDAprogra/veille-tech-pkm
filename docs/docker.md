@@ -1,69 +1,47 @@
 # Stratégie Docker — Multi-stage build
 
-## Problème initial
-
-Le Dockerfile original utilisait `npx tsx src/index.ts` comme commande de démarrage :
+## Principe
 
 ```dockerfile
-FROM node:20-alpine
-RUN apk add --no-cache python3 make g++
-WORKDIR /app
-COPY package*.json ./
-RUN npm install
-COPY . .
-CMD ["npx", "tsx", "src/index.ts"]
-```
-
-### Conséquences
-
-- `npm install` installe **toutes** les dépendances y compris les `devDependencies` (`typescript`, `tsx`, `@types/*`)
-- `tsx` transpile TypeScript en mémoire à chaque démarrage — coûteux en RAM
-- Résultat : la machine crashait au démarrage avec 256MB de RAM allouée
-
-## Solution — Multi-stage build
-
-```dockerfile
-# Stage 1 : compilation
-FROM node:20-alpine AS builder
+# Étape 1 : compilation
+FROM node:22-alpine AS builder
 RUN apk add --no-cache python3 make g++
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
-COPY tsconfig.json ./
+COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
-RUN npx tsc
+RUN npm run build && npm prune --omit=dev
 
-# Stage 2 : production
-FROM node:20-alpine AS production
-RUN apk add --no-cache python3 make g++
+# Étape 2 : exécution
+FROM node:22-alpine AS production
+ENV NODE_ENV=production
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci --omit=dev
+COPY package.json ./
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
+COPY public ./public
 CMD ["node", "dist/index.js"]
 ```
 
-## Résultats
+## Justification
 
-| Métrique | Avant | Après |
+| Choix | Raison |
+|---|---|
+| Compilation dans une étape séparée | Le JavaScript est précompilé : pas de `tsx` ni de transpilation en mémoire au démarrage (cause du crash initial à 256 MB) |
+| `npm prune --omit=dev` puis copie de `node_modules` | L'image finale ne contient ni `typescript`, ni Biome, ni compilateur C++ : `python3 make g++` ne servent qu'à l'étape de build (addon natif de `better-sqlite3`) |
+| `node:22-alpine` | Image minimale, version LTS maintenue (Node 20 est en fin de vie depuis avril 2026) |
+| `npm ci` | Installation reproductible à partir de `package-lock.json` |
+| `public/` copié | Tableau de bord servi par Express |
+
+## Évolution
+
+| Version | Démarrage | Contenu de l'image |
 |---|---|---|
-| RAM requise au démarrage | > 512MB | ≤ 256MB |
-| Dépendances en prod | toutes (dev + prod) | prod uniquement |
-| Commande de démarrage | `npx tsx src/index.ts` | `node dist/index.js` |
-| Transpilation au runtime | oui (tsx à chaud) | non (JS précompilé) |
+| Initiale | `npx tsx src/index.ts` | Toutes les dépendances, transpilation à chaud |
+| Multi-stage v1 | `node dist/index.js` | Dépendances de prod, mais chaîne de compilation C++ réinstallée dans l'image finale |
+| Actuelle | `node dist/index.js` | Dépendances de prod uniquement, aucun outil de build |
 
-## Justification des choix
+## Santé
 
-**`node:20-alpine`** — image minimale (~50MB), LTS, open source.
-
-**`python3 make g++`** — requis pour la compilation native de `better-sqlite3` qui inclut un addon C++ (`better_sqlite3.node`).
-
-**`npm ci` vs `npm install`** — `npm ci` est reproductible et plus rapide en CI : il installe exactement ce que `package-lock.json` décrit sans résolution de conflits.
-
-**`--omit=dev`** — exclut `typescript`, `tsx`, `@types/*` du container de production. Ces outils ne sont utiles qu'au build.
-
-## Souveraineté numérique
-
-- Image de base open source (Node.js Foundation / OpenJS)
-- Aucune dépendance à un registre d'images privé
-- Build reproductible via `package-lock.json` versionné
+`fly.toml` déclare une sonde HTTP sur `GET /health` (toutes les 30 s), qui vérifie aussi l'accès à la base.

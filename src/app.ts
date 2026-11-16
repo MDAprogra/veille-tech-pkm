@@ -1,0 +1,15 @@
+import type { Config } from "./config.js";
+import type { Store } from "./db/store.js";
+import type { Llm } from "./llm/mistral.js";
+import type { Scheduler } from "./pipeline/scheduler.js";
+import type { WebSearch } from "./services/ask.js";
+
+/** Dépendances partagées par toutes les interfaces (bot, API, MCP). */
+export interface App {
+	config: Config;
+	store: Store;
+	scheduler: Scheduler;
+	llm?: Llm;
+	webSearch?: WebSearch;
+	startedAt: Date;
+}

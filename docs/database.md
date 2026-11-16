@@ -2,134 +2,83 @@
 
 ## Choix technologique
 
-**SQLite** via `better-sqlite3` (v12.10.1)
-
-### Justification
+**SQLite** via `better-sqlite3`, en mode WAL, avec l'extension **FTS5** pour la recherche plein texte.
 
 | Critère | SQLite | PostgreSQL | MongoDB |
 |---|---|---|---|
-| Complexité opérationnelle | Nulle — fichier unique | Élevée — serveur dédié | Élevée — serveur dédié |
+| Complexité opérationnelle | Nulle — fichier unique | Serveur dédié | Serveur dédié |
 | Adapté au volume | ✅ < 100k articles | Surdimensionné | Surdimensionné |
-| Données relationnelles | ✅ Oui | ✅ Oui | ❌ Non |
-| Persistance Fly.io | ✅ Volume monté `/data` | Nécessite un add-on payant | Nécessite un add-on payant |
-| Licence | Open source (domaine public) | Open source (PostgreSQL License) | Open source (SSPL) |
-| Souveraineté numérique | ✅ Embarqué, aucune dépendance externe | ⚠️ Dépend de l'hébergeur | ⚠️ Dépend de l'hébergeur |
+| Recherche plein texte | ✅ FTS5 intégré | ✅ | ✅ |
+| Persistance Fly.io | ✅ Volume monté `/data` | Add-on payant | Add-on payant |
+| Souveraineté | ✅ Embarqué, aucune dépendance externe | ⚠️ Dépend de l'hébergeur | ⚠️ Dépend de l'hébergeur |
 
-SQLite est le choix justifié pour ce projet : volume de données modéré (~quelques milliers d'articles), un seul processus écrivant en base, pas de requêtes concurrentes, déploiement simplifié sur Fly.io via volume persistant.
+Un seul processus écrit en base, le volume est modéré : SQLite suffit largement.
 
----
-
-## Schéma de la base
+## Schéma
 
 ### Table `articles`
 
-Unique table de la base — contient l'intégralité des articles collectés, résumés et scorés.
+| Colonne | Type | Description |
+|---|---|---|
+| `id` | INTEGER PK | Identifiant |
+| `title` | TEXT NOT NULL | Titre (HTML retiré) |
+| `url` | TEXT UNIQUE NOT NULL | URL sans paramètres de tracking — clé de déduplication |
+| `source` | TEXT | Nom de la source |
+| `summary` | TEXT | Résumé Mistral (NULL tant que l'article n'est pas enrichi) |
+| `content` | TEXT | Extrait du flux, texte brut, 6 000 caractères max |
+| `published_at` | TEXT | Date de publication, ISO 8601 |
+| `score` | INTEGER | Pertinence 1–5 (0 = non noté) |
+| `tags` | TEXT (JSON) | Tableau de 0 à 3 thèmes d'une liste fermée |
+| `status` | TEXT | `pending` (à enrichir), `done`, `failed` |
+| `attempts` | INTEGER | Tentatives d'enrichissement (abandon à 3) |
+| `notified_at` | TEXT | Date de notification Telegram (NULL = jamais notifié) |
+| `created_at` | TEXT | Date d'insertion (UTC) |
 
-```sql
-CREATE TABLE IF NOT EXISTS articles (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    title        TEXT    NOT NULL,
-    url          TEXT    UNIQUE NOT NULL,
-    source       TEXT,
-    summary      TEXT,
-    content      TEXT,
-    published_at TEXT,
-    score        INTEGER DEFAULT 0,
-    created_at   TEXT    DEFAULT (datetime('now'))
-);
-```
+Index : `created_at`, `status`, `score`.
 
-### Description des colonnes
+### Table virtuelle `articles_fts` (FTS5)
 
-| Colonne | Type | Contrainte | Description |
-|---|---|---|---|
-| `id` | INTEGER | PK, AUTOINCREMENT | Identifiant unique généré par SQLite |
-| `title` | TEXT | NOT NULL | Titre de l'article tel que fourni par le flux RSS |
-| `url` | TEXT | UNIQUE NOT NULL | URL canonique — clé de déduplication |
-| `source` | TEXT | — | Nom de la source RSS (ex: "Dev.to", "Korben") |
-| `summary` | TEXT | — | Résumé en 3-4 phrases généré par Mistral AI |
-| `content` | TEXT | — | Extrait brut du flux RSS (limité à 2000 chars au traitement) |
-| `published_at` | TEXT | — | Date de publication fournie par le flux RSS (ISO 8601) |
-| `score` | INTEGER | DEFAULT 0 | Score de pertinence 1–5 attribué par Mistral AI |
-| `created_at` | TEXT | DEFAULT datetime('now') | Date d'insertion en base (UTC) |
+Indexe `title`, `summary`, `content` (table à contenu externe, synchronisée par trois triggers). Tokenizer `unicode61 remove_diacritics 2` : « securite » trouve « Sécurité ». Classement **BM25** pondéré : titre ×8, résumé ×4, contenu ×1.
 
-### Contraintes et index
+Une question libre est convertie en requête : mots vides retirés, mots-clés combinés en `OR` avec préfixe (`"react"* OR "compil"*`). Les mots sont mis entre guillemets, ce qui neutralise la syntaxe FTS dans la saisie de l'utilisateur.
 
-- `UNIQUE` sur `url` — garantit l'absence de doublons, même si un article apparaît dans plusieurs collectes
-- `INSERT OR IGNORE` — un article déjà présent est silencieusement ignoré sans erreur
-- Pas d'index explicite — le volume actuel ne le justifie pas, SQLite utilise un B-tree sur la PK
+### Table `runs`
 
----
+Une ligne par collecte : `started_at`, `finished_at`, `fetched`, `inserted`, `enriched`, `failed`, `notified`, `sources_failed` (JSON), `error`. Elle remplace les compteurs en mémoire, perdus à chaque redémarrage, et sert à ne pas recollecter après un redéploiement.
 
-## Migration
+### Table `meta`
 
-La base intègre un mécanisme de migration minimaliste pour la colonne `score`, ajoutée après la création initiale :
+Clé/valeur (ex. `last_digest` : date du dernier digest hebdomadaire).
 
-```typescript
-try {
-    db.exec(`ALTER TABLE articles ADD COLUMN score INTEGER DEFAULT 0`);
-} catch {
-    // Colonne déjà existante — on ignore
-}
-```
+## Migrations
 
-Ce pattern try/catch permet de déployer la migration de manière idempotente sans outil dédié.
+`src/db/migrations.ts` — liste ordonnée de fonctions, version courante stockée dans `PRAGMA user_version`, chaque migration dans une transaction.
 
----
+- **v1** : schéma historique (`CREATE TABLE IF NOT EXISTS`).
+- **v2** : colonnes `tags`, `status`, `attempts`, `notified_at` ; index ; FTS5 et triggers, reconstruits sur l'existant ; tables `runs` et `meta`. Les données en place sont reprises : articles existants marqués comme déjà notifiés, anciens « Résumé indisponible. » remis en file (`failed`), dates RFC 822 converties en ISO 8601.
+
+Un test (`tests/store.test.ts`) crée une base au format v1 et vérifie la reprise.
 
 ## Requêtes principales
 
-### Insertion d'un article
-
 ```sql
-INSERT OR IGNORE INTO articles 
-    (title, url, source, summary, content, published_at, score)
-VALUES 
-    (@title, @url, @source, @summary, @content, @published_at, @score)
+-- File d'enrichissement : nouveaux d'abord, puis échecs à retenter
+SELECT * FROM articles
+WHERE status = 'pending' OR (status = 'failed' AND attempts < 3)
+ORDER BY status = 'pending' DESC, created_at DESC LIMIT ?;
+
+-- Recherche plein texte
+SELECT a.* FROM articles_fts f JOIN articles a ON a.id = f.rowid
+WHERE articles_fts MATCH ? AND a.status = 'done'
+ORDER BY bm25(articles_fts, 8.0, 4.0, 1.0) LIMIT ?;
+
+-- Filtre par thème
+SELECT * FROM articles a
+WHERE EXISTS (SELECT 1 FROM json_each(a.tags) WHERE value = ?);
 ```
 
-### Articles récents
+## Stockage et exports
 
-```sql
-SELECT * FROM articles 
-ORDER BY created_at DESC 
-LIMIT ?
-```
-
-### Recherche full-text (simplifiée)
-
-```sql
-SELECT * FROM articles 
-WHERE title LIKE ? OR summary LIKE ? OR content LIKE ?
-ORDER BY created_at DESC 
-LIMIT ?
-```
-
-### Export pour analyse
-
-```sql
-SELECT * FROM articles 
-WHERE summary != 'Résumé indisponible.'
-ORDER BY created_at DESC
-```
-
----
-
-## Infrastructure de stockage
-
-- **Fichier** : `/data/veille.db`
-- **Volume Fly.io** : `vol_r68njqo9plgmemj4` — persistant entre les déploiements
-- **Taille actuelle** : ~2.2MB
-- **Capacité estimée** : SQLite supporte jusqu'à 281TB — largement suffisant pour ce cas d'usage
-- **Sauvegarde** : non automatisée à ce stade — à prévoir (Fly.io snapshots ou export CSV périodique)
-
----
-
-## Évolutions prévues
-
-| Évolution | Justification | Priorité |
-|---|---|---|
-| Index sur `score` et `created_at` | Optimiser les requêtes de filtrage quand le volume dépasse 10k articles | Basse |
-| Export CSV automatique | Alimenter le dataset d'entraînement du modèle scikit-learn (C.27-I) | Haute |
-| Sauvegarde automatique | PRA — éviter la perte de données en cas de corruption du volume | Moyenne |
-| Full-text search SQLite (FTS5) | Remplacer les `LIKE` par un index FTS pour de meilleures performances de recherche | Basse |
+- Fichier `/data/veille.db` sur le volume Fly.io `veille_data`, persistant entre les déploiements.
+- Export Markdown et **CSV** (`/export csv`, `GET /api/export.csv`) — le CSV sert de jeu de données pour une analyse ou un modèle.
+- Sauvegarde : non automatisée (snapshots Fly.io du volume) — à prévoir.
