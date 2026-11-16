@@ -67,7 +67,7 @@ export async function runPipeline(deps: PipelineDeps): Promise<RunResult> {
 				}
 			}
 		} else {
-			log.warn("MISTRAL_API_KEY absente — articles laissés en file d'attente");
+			log.warn("Aucun modèle d'IA configuré — articles laissés en file d'attente");
 		}
 
 		if (deps.notify) {

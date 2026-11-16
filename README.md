@@ -27,7 +27,7 @@ Un seul processus Node.js, hébergé sur **Fly.io (Paris, cdg)**.
 |---|---|---|
 | Runtime | Node.js 22 + TypeScript strict | Typage fort, écosystème riche |
 | Collecte | rss-parser | Léger, flux lus en parallèle (4 à la fois) |
-| IA | Mistral AI (`mistral-small-latest`, mode JSON) | Souveraineté française 🇫🇷 |
+| IA | Mistral AI (`mistral-small-latest`, mode JSON) ou tout fournisseur compatible OpenAI | Souveraineté française 🇫🇷, sans dépendre d'un seul fournisseur |
 | Stockage | SQLite (better-sqlite3) + FTS5 | Zéro serveur, recherche plein texte intégrée |
 | Bot | grammY (long polling) | Typé, maintenu, sans webhook à exposer |
 | API / MCP | Express 5 + SDK MCP officiel | Un seul port pour tout |
@@ -107,6 +107,18 @@ npm run dev               # démarrage avec rechargement
 npm run check             # lint + types + tests
 ```
 
+### Fournisseur d'IA
+
+Par défaut, l'outil appelle Mistral (`MISTRAL_API_KEY`). Pour passer par un autre fournisseur compatible OpenAI (Eden AI, Scaleway, OVHcloud AI Endpoints, EUrouter…), définir les trois variables suivantes ; elles sont alors prioritaires sur Mistral :
+
+```bash
+LLM_BASE_URL=https://api.edenai.run/v3   # ou https://api.scaleway.ai/v1, etc.
+LLM_API_KEY=…
+LLM_MODEL=…                              # identifiant exact du modèle chez ce fournisseur
+```
+
+Pour conserver l'argument de souveraineté, choisir un modèle européen (Mistral) et, chez un routeur comme Eden AI, désactiver les bascules automatiques vers des fournisseurs américains.
+
 Variables d'environnement : voir [.env.example](.env.example). Aucune n'est obligatoire pour démarrer : chaque fonction absente (bot, IA, API) est désactivée avec un avertissement dans les logs.
 
 `npm run requeue` remet en file d'enrichissement les articles sans thème ni score (historique antérieur à la v2) ; ils sont retraités au fil des collectes.
@@ -119,7 +131,7 @@ src/
 ├── config.ts             Variables d'environnement validées (zod)
 ├── sources.ts            Flux suivis et liste des thèmes
 ├── db/                   SQLite : migrations versionnées, requêtes, FTS5
-├── llm/mistral.ts        Client Mistral : cadence, retry avec backoff
+├── llm/                  Clients Mistral et compatible OpenAI : cadence, retry avec backoff
 ├── pipeline/             collect → enrich → run, planificateur
 ├── services/             ask (RAG), analyze, mise en forme et exports
 └── interfaces/           telegram, http (API + tableau de bord), mcp
