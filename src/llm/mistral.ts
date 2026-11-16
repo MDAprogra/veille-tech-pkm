@@ -1,9 +1,26 @@
 import { Mistral } from "@mistralai/mistralai";
 import { log } from "../logger.js";
 
-export interface Llm {
-	complete(prompt: string, options?: { json?: boolean; maxTokens?: number }): Promise<string>;
+export type Purpose = "enrich" | "ask" | "analyze" | "sources";
+
+export interface CompleteOptions {
+	json?: boolean;
+	maxTokens?: number;
+	/** À quoi sert l'appel : permet de ventiler la consommation de tokens. */
+	purpose?: Purpose;
 }
+
+export interface Llm {
+	complete(prompt: string, options?: CompleteOptions): Promise<string>;
+}
+
+export interface Usage {
+	promptTokens: number;
+	completionTokens: number;
+}
+
+/** Résultat d'un appel brut au fournisseur : le texte, et la consommation si elle est connue. */
+export type RawCompletion = string | { text: string; usage?: Usage };
 
 export interface RetryOptions {
 	attempts?: number;
@@ -11,6 +28,8 @@ export interface RetryOptions {
 	baseDelayMs?: number;
 	/** Intervalle minimal entre deux appels (respect du rate limit). */
 	minIntervalMs?: number;
+	/** Appelé après chaque appel réussi dont le fournisseur a indiqué la consommation. */
+	onUsage?: (purpose: Purpose | "other", usage: Usage) => void;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -31,8 +50,8 @@ export function isRetryable(err: unknown): boolean {
 
 /** Ajoute cadence minimale et retry avec backoff autour de n'importe quel appel LLM. */
 export function withRetry(
-	call: (prompt: string, options?: { json?: boolean; maxTokens?: number }) => Promise<string>,
-	{ attempts = 4, baseDelayMs = 15_000, minIntervalMs = 0 }: RetryOptions = {},
+	call: (prompt: string, options?: CompleteOptions) => Promise<RawCompletion>,
+	{ attempts = 4, baseDelayMs = 15_000, minIntervalMs = 0, onUsage }: RetryOptions = {},
 ): Llm {
 	let nextSlot = 0;
 	return {
@@ -42,7 +61,10 @@ export function withRetry(
 				if (wait > 0) await sleep(wait);
 				nextSlot = Date.now() + minIntervalMs;
 				try {
-					return await call(prompt, options);
+					const result = await call(prompt, options);
+					if (typeof result === "string") return result;
+					if (result.usage) onUsage?.(options?.purpose ?? "other", result.usage);
+					return result.text;
 				} catch (err) {
 					if (attempt >= attempts || !isRetryable(err)) throw err;
 					const delay = baseDelayMs * 2 ** (attempt - 1);
@@ -67,10 +89,19 @@ export function createMistral(apiKey: string, model: string, retry: RetryOptions
 			responseFormat: options?.json ? { type: "json_object" } : undefined,
 		});
 		const content = result.choices?.[0]?.message?.content;
-		if (typeof content === "string") return content;
-		if (Array.isArray(content)) {
-			return content.map((chunk) => ("text" in chunk ? chunk.text : "")).join("");
-		}
-		return "";
+		const text =
+			typeof content === "string"
+				? content
+				: Array.isArray(content)
+					? content.map((chunk) => ("text" in chunk ? chunk.text : "")).join("")
+					: "";
+		const { promptTokens, completionTokens } = result.usage ?? {};
+		return {
+			text,
+			usage:
+				typeof promptTokens === "number"
+					? { promptTokens, completionTokens: completionTokens ?? 0 }
+					: undefined,
+		};
 	}, retry);
 }

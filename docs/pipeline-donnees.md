@@ -6,7 +6,7 @@
 
 ## Sources
 
-Définies dans `src/sources.ts` (nom, URL, catégorie, langue).
+Enregistrées dans la table `sources` et gérées depuis le tableau de bord (ajout, désactivation, suppression, propositions de l'IA à valider). La liste ci-dessous est celle d'origine (`src/sources.ts`), qui initialise la table.
 
 | Catégorie | Sources |
 |---|---|
@@ -45,6 +45,10 @@ Les URL déjà en base sont écartées **avant** tout appel à l'IA. Les nouveau
 | Mistral indisponible, quota épuisé, clé invalide | Enrichissement interrompu, articles laissés en file sans compter d'essai |
 | `MISTRAL_API_KEY` absente | Collecte seule, articles en attente |
 
+**Doublons de sujet.** Pour un article récent, la base cherche jusqu'à 5 articles proches (plein texte sur le titre) publiés par d'autres sources dans les 5 derniers jours. S'il y en a, ils sont ajoutés au prompt et le modèle renvoie `duplicate_of` : le numéro du candidat qui couvre exactement la même annonce, ou `null`. La réponse n'est acceptée que si le numéro fait partie des candidats proposés. L'article est alors rattaché à l'article principal : pas de notification, pas de ligne en double, et une couverture « N sources » qui sert de signal d'importance.
+
+**Consommation.** Les tokens de chaque appel sont enregistrés (table `llm_usage`) et totalisés par collecte.
+
 ### 4. Notification (`src/interfaces/telegram.ts`)
 
 Articles `done`, de score ≥ 4 (`NOTIFY_MIN_SCORE`), jamais notifiés et collectés depuis moins de 2 jours. Messages regroupés par source, en HTML échappé, découpés sans couper un article. `notified_at` garantit qu'un article n'est notifié qu'une fois.
@@ -63,7 +67,10 @@ Le lundi, après la première collecte : analyse Mistral des 7 derniers jours (t
 | Rate limit Mistral | Cadence minimale + retry avec backoff |
 | Collectes concurrentes | Verrou du planificateur (`/collect` pendant une collecte : refusé) |
 | Redéploiement | Prochaine collecte calculée depuis la dernière enregistrée |
-| Traçabilité | Table `runs`, commandes `/infos` et `/logs`, `GET /api/runs` |
+| Traçabilité | Table `runs`, commandes `/infos` et `/logs`, page Système du tableau de bord |
+| Santé des sources | Dernière lecture réussie et erreurs consécutives par flux |
+| Nouvelles sources | Proposées par l'IA, vérifiées par lecture réelle du flux, notées, puis validées à la main |
+| Coût de l'IA | Tokens enregistrés par jour et par usage, coût estimé affiché |
 
 ## Types métier
 

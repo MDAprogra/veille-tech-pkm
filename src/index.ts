@@ -4,7 +4,7 @@ import { loadConfig } from "./config.js";
 import { Store } from "./db/store.js";
 import { createHttpApp } from "./interfaces/http.js";
 import { createTelegram, type TelegramInterface } from "./interfaces/telegram.js";
-import { createMistral } from "./llm/mistral.js";
+import { createMistral, type RetryOptions } from "./llm/mistral.js";
 import { createOpenAICompatible } from "./llm/openai-compatible.js";
 import { log } from "./logger.js";
 import { createFeedFetcher } from "./pipeline/collect.js";
@@ -12,12 +12,15 @@ import { runPipeline } from "./pipeline/run.js";
 import { mondayKey, Scheduler } from "./pipeline/scheduler.js";
 import { analyze } from "./services/analyze.js";
 import type { WebSearch } from "./services/ask.js";
-import { SOURCES } from "./sources.js";
+import { createTextFetcher } from "./services/sources.js";
 
 const config = loadConfig();
 const store = new Store(config.db.path);
 
-const retry = { minIntervalMs: config.mistral.minIntervalMs };
+const retry: RetryOptions = {
+	minIntervalMs: config.mistral.minIntervalMs,
+	onUsage: (purpose, usage) => store.addUsage(purpose, usage.promptTokens, usage.completionTokens),
+};
 const llm = config.llm
 	? createOpenAICompatible(config.llm, retry)
 	: config.mistral.apiKey
@@ -50,7 +53,6 @@ const scheduler = new Scheduler({
 	run: () =>
 		runPipeline({
 			store,
-			sources: SOURCES,
 			fetchFeed,
 			llm,
 			notify:
@@ -74,7 +76,17 @@ async function weeklyDigest(): Promise<void> {
 	store.setMeta("last_digest", monday);
 }
 
-const app: App = { config, store, scheduler, llm, llmLabel, webSearch, startedAt: new Date() };
+const app: App = {
+	config,
+	store,
+	scheduler,
+	llm,
+	llmLabel,
+	webSearch,
+	fetchFeed,
+	fetchText: createTextFetcher(),
+	startedAt: new Date(),
+};
 log.info(`🧠 IA : ${llmLabel ?? "non configurée"}`);
 
 if (config.telegram.token) {

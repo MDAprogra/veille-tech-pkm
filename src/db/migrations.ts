@@ -1,4 +1,5 @@
 import type { Database } from "better-sqlite3";
+import { SOURCES } from "../sources.js";
 
 /**
  * Migrations versionnées via `PRAGMA user_version`.
@@ -92,6 +93,59 @@ const MIGRATIONS: Array<(db: Database) => void> = [
 			const iso = toIso(row.published_at);
 			if (iso && iso !== row.published_at) update.run(iso, row.id);
 		}
+	},
+
+	// v3 — sources en base, regroupement des doublons, actions de lecture, suivi des tokens, rapports
+	(db) => {
+		db.exec(`
+			CREATE TABLE sources (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				name TEXT NOT NULL,
+				url TEXT UNIQUE NOT NULL,
+				category TEXT NOT NULL DEFAULT 'web',
+				lang TEXT NOT NULL DEFAULT 'en',
+				status TEXT NOT NULL DEFAULT 'active', -- active | disabled | suggested | rejected
+				origin TEXT NOT NULL DEFAULT 'builtin', -- builtin | user | ai
+				note TEXT,
+				ai_score INTEGER,
+				created_at TEXT NOT NULL DEFAULT (datetime('now')),
+				last_success_at TEXT,
+				last_item_count INTEGER,
+				last_error TEXT,
+				last_error_at TEXT,
+				failures INTEGER NOT NULL DEFAULT 0
+			);
+
+			ALTER TABLE articles ADD COLUMN cluster_id INTEGER;
+			ALTER TABLE articles ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
+			ALTER TABLE articles ADD COLUMN dismissed INTEGER NOT NULL DEFAULT 0;
+			ALTER TABLE articles ADD COLUMN read_at TEXT;
+			CREATE INDEX idx_articles_cluster ON articles (cluster_id);
+
+			CREATE TABLE llm_usage (
+				day TEXT NOT NULL,
+				purpose TEXT NOT NULL,
+				calls INTEGER NOT NULL DEFAULT 0,
+				prompt_tokens INTEGER NOT NULL DEFAULT 0,
+				completion_tokens INTEGER NOT NULL DEFAULT 0,
+				PRIMARY KEY (day, purpose)
+			);
+			ALTER TABLE runs ADD COLUMN prompt_tokens INTEGER NOT NULL DEFAULT 0;
+			ALTER TABLE runs ADD COLUMN completion_tokens INTEGER NOT NULL DEFAULT 0;
+			ALTER TABLE runs ADD COLUMN duplicates INTEGER NOT NULL DEFAULT 0;
+
+			CREATE TABLE reports (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				created_at TEXT NOT NULL DEFAULT (datetime('now')),
+				days INTEGER,
+				articles INTEGER NOT NULL DEFAULT 0,
+				content TEXT NOT NULL
+			);
+		`);
+		const insert = db.prepare(
+			"INSERT OR IGNORE INTO sources (name, url, category, lang) VALUES (@name, @url, @category, @lang)",
+		);
+		for (const source of SOURCES) insert.run(source);
 	},
 ];
 

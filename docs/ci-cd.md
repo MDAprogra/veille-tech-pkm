@@ -32,6 +32,7 @@ Déclenché sur `push` vers `main` uniquement, et seulement si `quality` réussi
 |---|---|
 | `tests/store.test.ts` | Reprise d'une base v1, recherche FTS5 (accents, préfixes, saisie hostile), filtres, statistiques |
 | `tests/pipeline.test.ts` | Collecte, déduplication, aucun appel IA pour un article connu, reprise sur erreur, panne du fournisseur, retry, plage horaire |
+| `tests/features.test.ts` | Sources (ajout vérifié, adresses internes refusées, propositions de l'IA), groupes de doublons, actions de lecture, pagination, tendances, rapports, coût |
 | `tests/interfaces.test.ts` | Authentification de l'API, filtres, exports, outils MCP et jeton MCP, RAG `/ask`, mise en forme Telegram, configuration |
 
 ## Historique
@@ -41,4 +42,4 @@ Déclenché sur `push` vers `main` uniquement, et seulement si `quality` réussi
 | CI #1 | ❌ | Newline manquante détectée par Biome — le garde-fou fonctionne |
 | CI #2, #3 | ✅ | Correctif, puis déploiement automatique opérationnel |
 | Avant la v2 | ❌ | `src/api/mcp.ts` et `summarizer.ts` non formatés : `biome check` échoue sur ce commit, ce qui bloque le job `quality` et donc le déploiement |
-| v2 | ✅ | Lint, types, 20 tests et build verts |
+| v2 | ✅ | Lint, types, tests et build verts |

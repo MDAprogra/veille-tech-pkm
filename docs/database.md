@@ -36,6 +36,30 @@ Un seul processus écrit en base, le volume est modéré : SQLite suffit largeme
 
 Index : `created_at`, `status`, `score`.
 
+| `cluster_id` | INTEGER | Article principal du même sujet (NULL : l'article est lui-même principal) |
+| `favorite`, `dismissed` | INTEGER | Actions de lecture : favori, « pas pertinent » |
+| `read_at` | TEXT | Date de lecture (NULL = non lu) |
+
+Un article rattaché (`cluster_id` renseigné) n'apparaît plus dans les listes ; l'article principal expose `coverage` (nombre de sources distinctes) et `also_in` (leurs noms), calculés à la lecture.
+
+### Table `sources`
+
+| Colonne | Description |
+|---|---|
+| `name`, `url` (UNIQUE), `category`, `lang` | Identité du flux |
+| `status` | `active`, `disabled`, `suggested` (proposée par l'IA, à valider), `rejected` (refusée, pour ne pas être reproposée) |
+| `origin` | `builtin` (liste d'origine), `user`, `ai` |
+| `note`, `ai_score` | Avis et note de l'IA sur une proposition |
+| `last_success_at`, `last_item_count`, `last_error`, `last_error_at`, `failures` | État de santé, mis à jour à chaque collecte |
+
+### Table `llm_usage`
+
+Une ligne par jour et par usage (`enrich`, `ask`, `analyze`, `sources`) : `calls`, `prompt_tokens`, `completion_tokens`. Le coût est calculé à l'affichage à partir du prix configuré.
+
+### Table `reports`
+
+Rapports de tendances archivés : `created_at`, `days` (période, NULL = toute la veille), `articles`, `content` (Markdown).
+
 ### Table virtuelle `articles_fts` (FTS5)
 
 Indexe `title`, `summary`, `content` (table à contenu externe, synchronisée par trois triggers). Tokenizer `unicode61 remove_diacritics 2` : « securite » trouve « Sécurité ». Classement **BM25** pondéré : titre ×8, résumé ×4, contenu ×1.
@@ -44,7 +68,7 @@ Une question libre est convertie en requête : mots vides retirés, mots-clés c
 
 ### Table `runs`
 
-Une ligne par collecte : `started_at`, `finished_at`, `fetched`, `inserted`, `enriched`, `failed`, `notified`, `sources_failed` (JSON), `error`. Elle remplace les compteurs en mémoire, perdus à chaque redémarrage, et sert à ne pas recollecter après un redéploiement.
+Une ligne par collecte : `started_at`, `finished_at`, `fetched`, `inserted`, `enriched`, `duplicates`, `failed`, `notified`, `prompt_tokens`, `completion_tokens`, `sources_failed` (JSON), `error`. Elle remplace les compteurs en mémoire, perdus à chaque redémarrage, et sert à ne pas recollecter après un redéploiement.
 
 ### Table `meta`
 
@@ -56,6 +80,8 @@ Clé/valeur (ex. `last_digest` : date du dernier digest hebdomadaire).
 
 - **v1** : schéma historique (`CREATE TABLE IF NOT EXISTS`).
 - **v2** : colonnes `tags`, `status`, `attempts`, `notified_at` ; index ; FTS5 et triggers, reconstruits sur l'existant ; tables `runs` et `meta`. Les données en place sont reprises : articles existants marqués comme déjà notifiés, anciens « Résumé indisponible. » remis en file (`failed`), dates RFC 822 converties en ISO 8601.
+
+- **v3** : tables `sources` (initialisée avec la liste d'origine), `llm_usage`, `reports` ; colonnes `cluster_id`, `favorite`, `dismissed`, `read_at` sur `articles` ; `duplicates` et tokens sur `runs`.
 
 Un test (`tests/store.test.ts`) crée une base au format v1 et vérifie la reprise.
 

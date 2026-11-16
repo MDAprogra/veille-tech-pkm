@@ -2,8 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Article } from "../src/db/store.js";
 import { Store } from "../src/db/store.js";
+import type { Llm } from "../src/llm/mistral.js";
 import { withRetry } from "../src/llm/mistral.js";
-import { canonicalUrl, cleanText, collectFeeds } from "../src/pipeline/collect.js";
+import {
+	canonicalUrl,
+	cleanText,
+	collectFeeds,
+	type FeedFetcher,
+	type FeedItem,
+} from "../src/pipeline/collect.js";
 import { parseEnrichment } from "../src/pipeline/enrich.js";
 import { runPipeline } from "../src/pipeline/run.js";
 import { isActiveHour, mondayKey } from "../src/pipeline/scheduler.js";
@@ -133,7 +140,17 @@ test("enrichissement : JSON toléré dans du texte, score borné, tags filtrés"
 		summary: "Un résumé assez long pour passer la validation.",
 		score: 5,
 		tags: ["react", "securite"],
+		duplicateOf: null,
 	});
+	const withDuplicate =
+		'{"summary":"Un résumé assez long pour passer la validation.","score":4,"duplicate_of":"12"}';
+	assert.equal(parseEnrichment(withDuplicate, [12, 15]).duplicateOf, 12);
+	assert.equal(
+		parseEnrichment(withDuplicate, [15]).duplicateOf,
+		null,
+		"numéro hors candidats ignoré",
+	);
+	assert.equal(parseEnrichment(withDuplicate).duplicateOf, null);
 	assert.throws(() => parseEnrichment('{"summary":"court","score":3}'));
 	assert.throws(() => parseEnrichment("rien"));
 });
@@ -175,4 +192,85 @@ test("planificateur : plage horaire et lundi en heure de Paris", () => {
 	);
 	assert.equal(mondayKey(new Date("2026-06-14T22:30:00Z"), "Europe/Paris"), "2026-06-15");
 	assert.equal(mondayKey(new Date("2026-06-16T10:00:00Z"), "Europe/Paris"), null);
+});
+
+test("pipeline : doublons de sujet regroupés, source lue depuis la base, tokens comptés", async () => {
+	const store = new Store(":memory:");
+	for (const s of store.sources()) store.deleteSource(s.id);
+	store.addSource({ name: "Blog A", url: "https://a.test/rss" });
+	store.addSource({ name: "Blog B", url: "https://b.test/rss" });
+	store.addSource({ name: "Cassée", url: "https://ko.test/rss" });
+	store.addSource({ name: "Désactivée", url: "https://off.test/rss", status: "disabled" });
+
+	const fetched: string[] = [];
+	const feeds: Record<string, FeedItem[]> = {
+		"https://a.test/rss": [{ title: "React 20 est disponible", link: "https://a.test/react-20" }],
+		"https://b.test/rss": [],
+	};
+	const fetchFeed: FeedFetcher = async (url) => {
+		fetched.push(url);
+		if (!(url in feeds)) throw new Error("timeout");
+		return { items: feeds[url] };
+	};
+	// Faux LLM : signale comme doublon le premier candidat proposé, et déclare sa consommation.
+	const prompts: string[] = [];
+	const llm: Llm = {
+		async complete(prompt) {
+			prompts.push(prompt);
+			store.addUsage("enrich", 1000, 100);
+			const candidate = prompt.match(/^\[(\d+)\] /m)?.[1] ?? null;
+			return JSON.stringify({
+				summary: "Un résumé suffisamment long pour être accepté par la validation.",
+				score: 5,
+				tags: ["react"],
+				duplicate_of: candidate ? Number(candidate) : null,
+			});
+		},
+	};
+	const notified: Article[] = [];
+	const deps = pipelineDeps(store, {
+		sources: undefined,
+		fetchFeed,
+		llm,
+		notify: async (a) => void notified.push(...a),
+	});
+
+	const first = await runPipeline(deps);
+	assert.deepEqual(fetched.sort(), [
+		"https://a.test/rss",
+		"https://b.test/rss",
+		"https://ko.test/rss",
+	]);
+	assert.deepEqual(first.sources_failed, ["Cassée"]);
+	assert.equal(first.duplicates, 0);
+	assert.equal(first.prompt_tokens, 1000);
+	assert.doesNotMatch(prompts[0], /duplicate_of/, "aucun candidat : le prompt n'en parle pas");
+
+	const health = Object.fromEntries(store.sources().map((s) => [s.name, s]));
+	assert.equal(health["Blog A"].failures, 0);
+	assert.equal(health["Blog A"].last_item_count, 1);
+	assert.equal(health.Cassée.failures, 1);
+	assert.equal(health.Cassée.last_error, "timeout");
+	assert.equal(health.Désactivée.last_success_at, null);
+
+	// Une autre source publie la même annonce.
+	feeds["https://b.test/rss"] = [{ title: "Sortie de React 20", link: "https://b.test/react-20" }];
+	const second = await runPipeline(deps);
+	assert.equal(second.enriched, 1);
+	assert.equal(second.duplicates, 1);
+	assert.match(prompts[1], /\[\d+\] React 20 est disponible \(Blog A\)/);
+
+	const listed = store.list();
+	assert.equal(listed.length, 1, "le doublon n'apparaît plus dans la liste");
+	assert.equal(listed[0].coverage, 2);
+	assert.deepEqual(listed[0].also_in, ["Blog B"]);
+	assert.equal(store.clusterMembers(listed[0].id)[0].source, "Blog B");
+	assert.equal(
+		store.search("sortie")[0].id,
+		listed[0].id,
+		"la recherche ramène à l'article principal",
+	);
+	assert.equal(notified.length, 1, "le doublon n'est pas notifié");
+	assert.equal(store.runs(1)[0].duplicates, 1);
+	assert.equal(store.usageTotals("month", "enrich").calls, 2);
 });

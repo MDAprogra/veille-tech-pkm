@@ -4,49 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Veille Tech — Tableau de bord</title>
-<style>
-:root {
-	color-scheme: light;
-	--surface: #fcfcfb; --panel: #ffffff; --line: #e4e3df;
-	--text: #0b0b0b; --muted: #52514e; --series: #2a78d6; --accent: #184f95;
-}
-@media (prefers-color-scheme: dark) {
-	:root {
-		color-scheme: dark;
-		--surface: #1a1a19; --panel: #232322; --line: #3a3a37;
-		--text: #f0efec; --muted: #c3c2b7; --series: #3987e5; --accent: #9ec5f4;
-	}
-}
-* { box-sizing: border-box; }
-body { margin: 0; background: var(--surface); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
-main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
-header { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; justify-content: space-between; }
-h1 { font-size: 22px; margin: 0; }
-h2 { font-size: 14px; margin: 0 0 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
-.muted { color: var(--muted); font-size: 13px; }
-.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 20px 0; }
-.tile b { display: block; font-size: 28px; line-height: 1.2; }
-.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
-.bar-row { display: grid; grid-template-columns: 130px 1fr; gap: 8px; align-items: center; margin: 5px 0; font-size: 13px; }
-.bar-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
-.track { display: flex; align-items: center; gap: 6px; }
-.bar { height: 14px; min-width: 2px; background: var(--series); border-radius: 0 4px 4px 0; }
-.bar-row:hover .bar { filter: brightness(1.15); }
-.filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 12px; }
-input, select, button { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); }
-input[type=search] { flex: 1 1 220px; }
-button { cursor: pointer; }
-button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
-article { border-top: 1px solid var(--line); padding: 14px 0; }
-article h3 { font-size: 16px; margin: 0 0 4px; }
-article a { color: var(--accent); text-decoration: none; }
-article a:hover { text-decoration: underline; }
-article p { margin: 6px 0 0; }
-.tag { display: inline-block; font-size: 12px; padding: 1px 8px; border: 1px solid var(--line); border-radius: 99px; margin-left: 4px; color: var(--muted); }
-#login { max-width: 380px; margin: 15vh auto; display: grid; gap: 12px; }
-[hidden] { display: none !important; }
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 <main>
@@ -60,151 +18,142 @@ article p { margin: 6px 0 0; }
 
 	<div id="app" hidden>
 		<header>
-			<h1>Veille Tech — Tableau de bord</h1>
-			<div>
-				<span id="status" class="muted"></span>
+			<h1>Veille Tech</h1>
+			<div class="actions">
+				<span id="status" class="muted" role="status"></span>
 				<button id="collect">Collecter maintenant</button>
-				<button id="export-md">Export .md</button>
-				<button id="export-csv">Export .csv</button>
 				<button id="logout">Déconnexion</button>
 			</div>
 		</header>
 
-		<section class="tiles" id="tiles"></section>
+		<nav id="tabs" aria-label="Sections">
+			<a href="#articles">Articles</a>
+			<a href="#tendances">Tendances</a>
+			<a href="#rapport">Rapport</a>
+			<a href="#sources">Sources <span id="sources-badge" class="badge" hidden></span></a>
+			<a href="#systeme">Système</a>
+		</nav>
 
-		<section class="charts">
-			<div class="panel"><h2>Articles par semaine</h2><div id="chart-week"></div></div>
-			<div class="panel"><h2>Articles par thème</h2><div id="chart-tag"></div></div>
-			<div class="panel"><h2>Articles par source</h2><div id="chart-source"></div></div>
-			<div class="panel"><h2>Répartition des scores</h2><div id="chart-score"></div></div>
+		<div id="notice" class="notice" role="alert" hidden></div>
+
+		<section id="view-articles" class="view" hidden>
+			<div class="tiles" id="tiles"></div>
+			<form class="filters" id="filters">
+				<input type="search" id="q" placeholder="Rechercher dans la veille…" aria-label="Recherche">
+				<select id="tag" aria-label="Thème"><option value="">Tous les thèmes</option></select>
+				<select id="source" aria-label="Source"><option value="">Toutes les sources</option></select>
+				<select id="min_score" aria-label="Score minimum">
+					<option value="">Tous les scores</option>
+					<option value="3">Score ≥ 3</option><option value="4">Score ≥ 4</option><option value="5">Score 5</option>
+				</select>
+				<label class="check"><input type="checkbox" id="favorite"> Favoris</label>
+				<label class="check"><input type="checkbox" id="unread"> Non lus</label>
+				<label class="check"><input type="checkbox" id="dismissed"> Inclure « pas pertinent »</label>
+				<button class="primary">Filtrer</button>
+				<button type="button" id="export-md">Export .md</button>
+				<button type="button" id="export-csv">Export .csv</button>
+			</form>
+			<div id="count" class="muted"></div>
+			<div id="articles"></div>
+			<div class="pager" id="pager"></div>
 		</section>
 
-		<form class="filters" id="filters">
-			<input type="search" id="q" placeholder="Rechercher dans la veille…">
-			<select id="tag" aria-label="Thème"><option value="">Tous les thèmes</option></select>
-			<select id="source" aria-label="Source"><option value="">Toutes les sources</option></select>
-			<select id="min_score" aria-label="Score minimum">
-				<option value="">Tous les scores</option>
-				<option value="3">Score ≥ 3</option><option value="4">Score ≥ 4</option><option value="5">Score 5</option>
-			</select>
-			<button class="primary">Filtrer</button>
-		</form>
-		<div id="count" class="muted"></div>
-		<section id="articles"></section>
+		<section id="view-tendances" class="view" hidden>
+			<div class="toolbar">
+				<h2>Évolution des thèmes, semaine par semaine</h2>
+				<select id="weeks" aria-label="Période">
+					<option value="8">8 semaines</option>
+					<option value="12" selected>12 semaines</option>
+					<option value="26">26 semaines</option>
+				</select>
+			</div>
+			<p class="muted" id="trends-note"></p>
+			<div class="multiples" id="trend-charts"></div>
+			<details class="panel">
+				<summary>Voir les données en tableau</summary>
+				<div class="table-wrap" id="trend-table"></div>
+			</details>
+			<div class="charts">
+				<div class="panel"><h2>Articles par source</h2><div id="chart-source"></div></div>
+				<div class="panel"><h2>Répartition des scores</h2><div id="chart-score"></div></div>
+			</div>
+		</section>
+
+		<section id="view-rapport" class="view" hidden>
+			<form class="toolbar" id="report-form">
+				<h2>Rapport de tendances</h2>
+				<select id="report-days" aria-label="Période analysée">
+					<option value="7">7 derniers jours</option>
+					<option value="14">14 derniers jours</option>
+					<option value="30" selected>30 derniers jours</option>
+					<option value="90">90 derniers jours</option>
+					<option value="">Toute la veille</option>
+				</select>
+				<button class="primary" id="report-generate">Générer un rapport</button>
+			</form>
+			<div class="split">
+				<aside class="panel">
+					<h2>Rapports archivés</h2>
+					<div id="report-list"></div>
+				</aside>
+				<article class="panel" id="report-view">
+					<p class="muted">Génère un rapport ou choisis-en un dans la liste.</p>
+				</article>
+			</div>
+		</section>
+
+		<section id="view-sources" class="view" hidden>
+			<div class="panel">
+				<h2>Ajouter une source</h2>
+				<form class="filters" id="source-form">
+					<input type="url" id="source-url" placeholder="Adresse du flux RSS, ou du site" required aria-label="Adresse">
+					<input type="text" id="source-name" placeholder="Nom (facultatif)" maxlength="80" aria-label="Nom">
+					<select id="source-category" aria-label="Catégorie"></select>
+					<select id="source-lang" aria-label="Langue"><option value="en">Anglais</option><option value="fr">Français</option></select>
+					<button class="primary">Vérifier et ajouter</button>
+				</form>
+				<p class="muted">Le flux est lu avant d'être enregistré. Si tu donnes l'adresse d'un site, son flux est recherché automatiquement.</p>
+			</div>
+
+			<div class="panel">
+				<div class="toolbar">
+					<h2>Propositions de l'IA</h2>
+					<button id="suggest">Chercher de nouvelles sources</button>
+				</div>
+				<p class="muted">L'IA propose des flux, chacun est réellement lu puis noté d'après ses derniers titres. Rien n'est suivi sans ton accord.</p>
+				<div id="suggest-status" class="muted" role="status"></div>
+				<div id="suggestions"></div>
+			</div>
+
+			<div class="panel">
+				<h2>Sources suivies</h2>
+				<div class="table-wrap" id="source-table"></div>
+				<details id="rejected-box" hidden>
+					<summary>Sources refusées</summary>
+					<div class="table-wrap" id="rejected-table"></div>
+				</details>
+			</div>
+		</section>
+
+		<section id="view-systeme" class="view" hidden>
+			<div class="tiles" id="system-tiles"></div>
+			<div class="charts">
+				<div class="panel"><h2>Consommation de l'IA ce mois-ci</h2><div class="table-wrap" id="usage-table"></div><p class="muted" id="usage-note"></p></div>
+				<div class="panel"><h2>Coût de l'IA par jour (30 jours)</h2><div id="chart-cost"></div></div>
+			</div>
+			<div class="panel"><h2>Dernières collectes</h2><div class="table-wrap" id="runs-table"></div></div>
+			<div class="charts">
+				<div class="panel"><h2>Configuration</h2><div id="system-config"></div></div>
+				<div class="panel"><h2>Événements récents</h2><ol id="events" class="events"></ol></div>
+			</div>
+		</section>
 	</div>
 </main>
-<script>
-const $ = (id) => document.getElementById(id);
-const el = (tag, props = {}, ...children) => {
-	const node = Object.assign(document.createElement(tag), props);
-	node.append(...children);
-	return node;
-};
-// sessionStorage peut être indisponible (navigation privée stricte) : repli en mémoire.
-const session = {
-	value: null,
-	get() { try { return sessionStorage.getItem("veille_token") ?? this.value; } catch { return this.value; } },
-	set(v) { this.value = v; try { v ? sessionStorage.setItem("veille_token", v) : sessionStorage.removeItem("veille_token"); } catch {} },
-};
 
-async function api(path, options = {}) {
-	const res = await fetch(`/api${path}`, { ...options, headers: { Authorization: `Bearer ${session.get()}` } });
-	if (res.status === 401) { session.set(null); showLogin("Jeton refusé."); throw new Error("401"); }
-	return res;
-}
+<dialog id="fiche" aria-labelledby="fiche-title">
+	<div id="fiche-body"></div>
+</dialog>
 
-function showLogin(message = "") {
-	$("app").hidden = true;
-	$("login").hidden = false;
-	$("login-error").textContent = message;
-}
-
-function bars(target, record, { limit = 12, label = (k) => k } = {}) {
-	const entries = Object.entries(record).slice(0, limit);
-	const max = Math.max(1, ...entries.map(([, n]) => n));
-	$(target).replaceChildren(
-		...(entries.length ? entries : [["—", 0]]).map(([key, n]) =>
-			el("div", { className: "bar-row", title: `${label(key)} : ${n} article(s)` },
-				el("span", { textContent: label(key) }),
-				el("div", { className: "track" },
-					el("div", { className: "bar", style: `width:${(n / max) * 85}%` }),
-					el("span", { textContent: String(n) }))))
-	);
-}
-
-const shortDate = (iso) => new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
-
-async function loadStats() {
-	const s = await (await api("/stats")).json();
-	const tile = (value, label) => el("div", { className: "panel tile" }, el("b", { textContent: String(value) }), el("span", { className: "muted", textContent: label }));
-	$("tiles").replaceChildren(
-		tile(s.total, "articles résumés"),
-		tile(s.averageScore ?? "—", "score moyen / 5"),
-		tile(s.sources, "sources suivies"),
-		tile(s.pending, "en attente de résumé"),
-		tile(s.failed, "résumés en échec"),
-	);
-	bars("chart-week", s.byWeek, { label: (k) => `Sem. du ${shortDate(k)}` });
-	bars("chart-tag", s.byTag);
-	bars("chart-source", s.bySource);
-	bars("chart-score", Object.fromEntries([1, 2, 3, 4, 5].map((n) => [n, s.scoreDistribution[n] ?? 0])), { label: (k) => `${"★".repeat(k)}` });
-	$("status").textContent = s.collecting ? "Collecte en cours… " : s.nextRunAt ? `Prochaine collecte : ${new Date(s.nextRunAt).toLocaleString("fr-FR")} ` : "";
-	const fill = (id, values) => { if ($(id).options.length === 1) $(id).append(...values.map((v) => el("option", { value: v, textContent: v }))); };
-	fill("tag", s.tags);
-	fill("source", Object.keys(s.bySource));
-}
-
-function filterParams() {
-	const params = new URLSearchParams();
-	for (const id of ["tag", "source", "min_score"]) if ($(id).value) params.set(id, $(id).value);
-	return params;
-}
-
-async function loadArticles() {
-	const params = filterParams();
-	const q = $("q").value.trim();
-	if (q) params.set("q", q);
-	params.set("limit", "50");
-	const articles = await (await api(`/articles?${params}`)).json();
-	$("count").textContent = `${articles.length} article(s) affiché(s)${q ? " — triés par pertinence" : " — les plus récents"}`;
-	$("articles").replaceChildren(...articles.map((a) => {
-		const safeUrl = /^https?:\/\//i.test(a.url) ? a.url : "#";
-		return el("article", {},
-			el("h3", {}, el("a", { href: safeUrl, target: "_blank", rel: "noopener noreferrer", textContent: a.title })),
-			el("div", { className: "muted" },
-				`${"★".repeat(a.score)}${"☆".repeat(Math.max(0, 5 - a.score))} · ${a.source} · ${new Date(a.published_at ?? `${a.created_at.replace(" ", "T")}Z`).toLocaleDateString("fr-FR")}`,
-				...a.tags.map((t) => el("span", { className: "tag", textContent: t }))),
-			el("p", { textContent: a.summary ?? "" }));
-	}));
-}
-
-async function download(ext) {
-	const blob = await (await api(`/export.${ext}?${filterParams()}`)).blob();
-	const link = el("a", { href: URL.createObjectURL(blob), download: `veille_export_${new Date().toISOString().slice(0, 10)}.${ext}` });
-	link.click();
-	URL.revokeObjectURL(link.href);
-}
-
-async function start() {
-	if (!session.get()) return showLogin();
-	try {
-		await loadStats();
-		$("login").hidden = true;
-		$("app").hidden = false;
-		await loadArticles();
-	} catch (err) { if (err.message !== "401") showLogin("Serveur injoignable."); }
-}
-
-$("login").addEventListener("submit", (e) => { e.preventDefault(); session.set($("token").value.trim()); start(); });
-$("filters").addEventListener("submit", (e) => { e.preventDefault(); loadArticles(); });
-$("logout").addEventListener("click", () => { session.set(null); showLogin(); });
-$("export-md").addEventListener("click", () => download("md"));
-$("export-csv").addEventListener("click", () => download("csv"));
-$("collect").addEventListener("click", async () => {
-	const res = await api("/collect", { method: "POST" });
-	$("status").textContent = res.status === 202 ? "Collecte lancée… " : "Collecte déjà en cours… ";
-});
-start();
-</script>
+<script src="app.js"></script>
 </body>
 </html>

@@ -1,12 +1,19 @@
+export const CATEGORIES = ["web", "ia", "communaute", "infra"] as const;
+export type Category = (typeof CATEGORIES)[number];
+
 export interface Source {
 	name: string;
 	url: string;
-	category: "web" | "ia" | "communaute" | "infra";
+	category: Category;
 	lang: "fr" | "en";
 	/** Nombre max d'articles pris par collecte (défaut : ITEMS_PER_SOURCE). */
 	limit?: number;
 }
 
+/**
+ * Sources d'origine. Elles servent uniquement à initialiser la table `sources` :
+ * ensuite, les flux se gèrent depuis le tableau de bord, sans redéploiement.
+ */
 export const SOURCES: Source[] = [
 	// Front / Web
 	{ name: "Dev.to", url: "https://dev.to/feed", category: "web", lang: "en" },

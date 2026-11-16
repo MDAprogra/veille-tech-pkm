@@ -1,5 +1,11 @@
 import { log } from "../logger.js";
-import { type Llm, type RetryOptions, withRetry } from "./mistral.js";
+import {
+	type CompleteOptions,
+	type Llm,
+	type RawCompletion,
+	type RetryOptions,
+	withRetry,
+} from "./mistral.js";
 
 export class HttpError extends Error {
 	constructor(
@@ -12,6 +18,7 @@ export class HttpError extends Error {
 
 interface ChatResponse {
 	choices?: Array<{ message?: { content?: string | Array<{ text?: string }> | null } }>;
+	usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
 /**
@@ -26,7 +33,7 @@ export function createOpenAICompatible(
 	// Le mode JSON n'est pas accepté partout : désactivé automatiquement au premier refus.
 	let jsonMode = true;
 
-	async function call(prompt: string, opts?: { json?: boolean; maxTokens?: number }) {
+	async function call(prompt: string, opts?: CompleteOptions): Promise<RawCompletion> {
 		const useJson = Boolean(opts?.json && jsonMode);
 		const res = await fetch(url, {
 			method: "POST",
@@ -58,9 +65,20 @@ export function createOpenAICompatible(
 			throw new HttpError(502, "Réponse du fournisseur illisible");
 		}
 		const content = data.choices?.[0]?.message?.content;
-		if (typeof content === "string") return content;
-		if (Array.isArray(content)) return content.map((c) => c.text ?? "").join("");
-		return "";
+		const text =
+			typeof content === "string"
+				? content
+				: Array.isArray(content)
+					? content.map((c) => c.text ?? "").join("")
+					: "";
+		const usage = data.usage;
+		return {
+			text,
+			usage:
+				typeof usage?.prompt_tokens === "number"
+					? { promptTokens: usage.prompt_tokens, completionTokens: usage.completion_tokens ?? 0 }
+					: undefined,
+		};
 	}
 
 	return withRetry(call, retry);
