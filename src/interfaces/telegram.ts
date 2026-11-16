@@ -21,7 +21,7 @@ const COMMANDS = [
 	["logs", "Derniers événements"],
 ] as const;
 
-const NO_LLM = "⚠️ MISTRAL_API_KEY n'est pas configurée : cette commande est indisponible.";
+const NO_LLM = "⚠️ Aucun modèle d'IA configuré : cette commande est indisponible.";
 
 export function escapeHtml(text: string): string {
 	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -267,7 +267,7 @@ export function createTelegram(app: App, token: string): TelegramInterface {
 				"",
 				"📡 Système",
 				`├ Sources : ${SOURCES.length}`,
-				`├ IA : ${app.llm ? config.mistral.model : "non configurée"}`,
+				`├ IA : ${app.llmLabel ?? "non configurée"}`,
 				`├ Recherche web : ${app.webSearch ? "Tavily" : "désactivée"}`,
 				`└ En ligne depuis : ${fmt(app.startedAt)}`,
 			].join("\n"),

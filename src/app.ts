@@ -10,6 +10,8 @@ export interface App {
 	store: Store;
 	scheduler: Scheduler;
 	llm?: Llm;
+	/** Modèle et fournisseur, pour l'affichage. */
+	llmLabel?: string;
 	webSearch?: WebSearch;
 	startedAt: Date;
 }

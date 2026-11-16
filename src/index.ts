@@ -5,6 +5,7 @@ import { Store } from "./db/store.js";
 import { createHttpApp } from "./interfaces/http.js";
 import { createTelegram, type TelegramInterface } from "./interfaces/telegram.js";
 import { createMistral } from "./llm/mistral.js";
+import { createOpenAICompatible } from "./llm/openai-compatible.js";
 import { log } from "./logger.js";
 import { createFeedFetcher } from "./pipeline/collect.js";
 import { runPipeline } from "./pipeline/run.js";
@@ -16,11 +17,17 @@ import { SOURCES } from "./sources.js";
 const config = loadConfig();
 const store = new Store(config.db.path);
 
-const llm = config.mistral.apiKey
-	? createMistral(config.mistral.apiKey, config.mistral.model, {
-			minIntervalMs: config.mistral.minIntervalMs,
-		})
-	: undefined;
+const retry = { minIntervalMs: config.mistral.minIntervalMs };
+const llm = config.llm
+	? createOpenAICompatible(config.llm, retry)
+	: config.mistral.apiKey
+		? createMistral(config.mistral.apiKey, config.mistral.model, retry)
+		: undefined;
+const llmLabel = config.llm
+	? `${config.llm.model} (${new URL(config.llm.baseUrl).hostname})`
+	: llm
+		? `${config.mistral.model} (Mistral)`
+		: undefined;
 
 let webSearch: WebSearch | undefined;
 if (config.tavily.apiKey) {
@@ -67,7 +74,8 @@ async function weeklyDigest(): Promise<void> {
 	store.setMeta("last_digest", monday);
 }
 
-const app: App = { config, store, scheduler, llm, webSearch, startedAt: new Date() };
+const app: App = { config, store, scheduler, llm, llmLabel, webSearch, startedAt: new Date() };
+log.info(`🧠 IA : ${llmLabel ?? "non configurée"}`);
 
 if (config.telegram.token) {
 	telegram = createTelegram(app, config.telegram.token);

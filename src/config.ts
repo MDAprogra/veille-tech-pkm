@@ -39,6 +39,9 @@ const schema = z.object({
 	MISTRAL_API_KEY: optional,
 	MISTRAL_MODEL: optional,
 	MISTRAL_MIN_INTERVAL_MS: int(1500),
+	LLM_BASE_URL: optional,
+	LLM_API_KEY: optional,
+	LLM_MODEL: optional,
 	TELEGRAM_BOT_TOKEN: optional,
 	TELEGRAM_CHAT_ID: optional,
 	TELEGRAM_PUBLIC: bool(false),
@@ -67,7 +70,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
 		throw new Error(`Configuration invalide :\n${details}`);
 	}
 	const e = parsed.data;
+	if (e.LLM_BASE_URL && (!e.LLM_API_KEY || !e.LLM_MODEL)) {
+		throw new Error("Configuration invalide : LLM_BASE_URL exige aussi LLM_API_KEY et LLM_MODEL");
+	}
+	if (e.LLM_BASE_URL && !URL.canParse(e.LLM_BASE_URL)) {
+		throw new Error("Configuration invalide : LLM_BASE_URL n'est pas une URL");
+	}
 	return {
+		/** Fournisseur compatible OpenAI ; prioritaire sur Mistral s'il est configuré. */
+		llm: e.LLM_BASE_URL
+			? { baseUrl: e.LLM_BASE_URL, apiKey: e.LLM_API_KEY as string, model: e.LLM_MODEL as string }
+			: undefined,
 		mistral: {
 			apiKey: e.MISTRAL_API_KEY,
 			model: e.MISTRAL_MODEL ?? "mistral-small-latest",
